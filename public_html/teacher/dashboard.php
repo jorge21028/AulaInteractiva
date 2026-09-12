@@ -62,6 +62,8 @@ require __DIR__ . '/../includes/header.php';
 ?>
 <h1>Panel del profesor</h1>
 
+<p><a class="btn" href="activities.php">Actividades interactivas</a></p>
+
 <section class="grid grid-3">
     <div class="card">
         <div class="stat-number"><?= (int) $totalCourses ?></div>

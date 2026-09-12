@@ -35,6 +35,8 @@ require __DIR__ . '/../includes/header.php';
 ?>
 <h1>Mis asignaturas</h1>
 
+<p><a class="btn" href="<?= e(rtrim(APP_URL, '/')) ?>/game/join.php">🎮 Unirse a un juego con un código</a></p>
+
 <?php if (empty($courses)): ?>
     <div class="card empty-state">
         <p>Aún no estás inscrito en ningún curso.</p>

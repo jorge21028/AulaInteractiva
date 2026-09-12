@@ -4,14 +4,27 @@ Plataforma educativa web independiente: actividades interactivas (tipo Kahoot/Ed
 
 Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks pesados. Compatible con hosting gratuito PHP/MySQL (InfinityFree).
 
-## Estado actual: FASE 1 completada
+## Estado actual: FASE 2 completada
 
+**Fase 1:**
 - Estructura del proyecto.
 - Base de datos (usuarios, roles, cursos, asignaturas, inscripciones, auditoría).
 - Autenticación: registro, login, logout, sesiones seguras, CSRF.
 - Roles: profesor, estudiante (admin reservado para fases futuras).
 - Panel del profesor: crear cursos, crear asignaturas, inscribir estudiantes por correo.
 - Panel del estudiante: ver sus cursos y asignaturas.
+
+**Fase 2 — Actividades interactivas y partidas en vivo:**
+- Creación manual de actividades (selección múltiple y verdadero/falso), con preguntas, opciones, tiempo y puntos configurables.
+- Publicación de actividades (borrador → publicada).
+- Partidas en vivo con código de acceso de 6 dígitos.
+- Sincronización en tiempo real mediante polling (fetch cada 1.5–2 segundos), sin WebSockets — compatible con InfinityFree.
+- Pantalla del profesor (control de la partida: iniciar, siguiente pregunta, ver resultados, finalizar).
+- Pantalla de proyección pública (código, pregunta, temporizador, resultados, ranking).
+- Pantalla del estudiante (unirse con código, responder, ver retroalimentación).
+- Sistema de puntuación: puntos base + bonificación por rapidez, configurable por actividad.
+- Avance automático de pregunta cuando se agota el tiempo, incluso si el profesor no interactúa.
+- Todo el flujo fue probado de extremo a extremo (registro → curso → actividad → partida → respuestas → ranking final) en un entorno local con MySQL real antes de la entrega.
 
 ## Requisitos
 
@@ -23,7 +36,9 @@ Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks 
 
 1. Copia la carpeta `public_html` dentro de tu servidor local (por ejemplo `htdocs/aulainteractiva`).
 2. Crea una base de datos vacía en MySQL, por ejemplo `aulainteractiva`.
-3. Importa `database/schema_fase1.sql` con phpMyAdmin o `mysql -u root -p aulainteractiva < database/schema_fase1.sql`.
+3. Importa `database/schema_fase1.sql` y luego `database/schema_fase2.sql` (en ese orden) con phpMyAdmin, o:
+   `mysql -u root -p aulainteractiva < database/schema_fase1.sql`
+   `mysql -u root -p aulainteractiva < database/schema_fase2.sql`
 4. Copia `public_html/config/env.example.php` como `public_html/config/env.php` y completa tus credenciales locales.
 5. Abre `http://localhost/aulainteractiva/index.php` en el navegador.
 6. Regístrate como profesor y como estudiante (dos cuentas distintas) para probar ambos flujos.
@@ -33,7 +48,7 @@ Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks 
 1. Crea tu cuenta y hosting en InfinityFree, y una base de datos MySQL desde el panel (vhost/cPanel).
 2. Sube el contenido de `public_html/` (no la carpeta en sí, sino su contenido) a la carpeta `htdocs` de tu hosting, vía Administrador de Archivos o FTP.
 3. En `config/env.php` (créalo en el servidor a partir de `env.example.php`) coloca las credenciales MySQL que InfinityFree te asigna (host, nombre de base de datos, usuario, contraseña).
-4. Importa `database/schema_fase1.sql` desde phpMyAdmin de InfinityFree.
+4. Importa `database/schema_fase1.sql` y luego `database/schema_fase2.sql` desde phpMyAdmin de InfinityFree.
 5. Ajusta `APP_URL` y `APP_ENV=production` en `env.php`.
 6. Visita tu dominio y prueba registro/login.
 
@@ -66,4 +81,4 @@ database/
 
 ## Próximo paso recomendado
 
-FASE 2: actividades interactivas (creación manual, preguntas, opciones, partidas con código de acceso, pantalla proyectada, pantalla del estudiante y resultados en tiempo real vía polling).
+FASE 3: integración con Google Gemini para generar preguntas de actividades interactivas (el profesor sigue revisando y publicando manualmente; Gemini nunca publica ni controla partidas).
