@@ -18,11 +18,11 @@ class Database
     public static function getConnection(): PDO
     {
         if (self::$instance === null) {
-            $host = getenv('DB_HOST') ?: 'localhost';
-            $db   = getenv('DB_NAME') ?: '';
-            $user = getenv('DB_USER') ?: '';
-            $pass = getenv('DB_PASSWORD') ?: '';
-            $port = getenv('DB_PORT') ?: '3306';
+            $host = DB_HOST;
+            $db   = DB_NAME;
+            $user = DB_USER;
+            $pass = DB_PASSWORD;
+            $port = defined('DB_PORT') ? DB_PORT : '3306';
 
             $dsn = "mysql:host={$host};port={$port};dbname={$db};charset=utf8mb4";
 

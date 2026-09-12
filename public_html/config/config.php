@@ -27,10 +27,26 @@ if (!file_exists($envPath)) {
 
 require_once $envPath;
 
+// ---- Validación de que env.php definió lo mínimo necesario ----
+$requiredConstants = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+foreach ($requiredConstants as $const) {
+    if (!defined($const)) {
+        http_response_code(500);
+        exit("Falta la constante {$const} en config/env.php. Revisa que copiaste env.example.php correctamente.");
+    }
+}
+
 // ---- Configuración general de la aplicación ----
 define('APP_NAME', 'AulaInteractiva');
-define('APP_ENV', getenv('APP_ENV') ?: 'production'); // 'local' | 'production'
-define('APP_URL', getenv('APP_URL') ?: 'http://localhost/aulainteractiva');
+
+// APP_ENV y APP_URL: se definen en env.php. Si por alguna razón no
+// se definieron ahí, usamos un valor por defecto seguro.
+if (!defined('APP_ENV')) {
+    define('APP_ENV', 'production');
+}
+if (!defined('APP_URL')) {
+    define('APP_URL', 'http://localhost/aulainteractiva');
+}
 
 // Mostrar errores solo en entorno local
 if (APP_ENV === 'local') {
