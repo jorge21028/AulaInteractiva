@@ -1,0 +1,162 @@
+:root {
+    --color-primary: #1E4FA3;
+    --color-primary-dark: #163B7A;
+    --color-primary-light: #E8F0FE;
+    --color-bg: #F5F7FA;
+    --color-surface: #FFFFFF;
+    --color-text: #1F2937;
+    --color-text-muted: #6B7280;
+    --color-border: #E2E8F0;
+    --color-success: #1E8E5A;
+    --color-danger: #C0392B;
+    --radius: 10px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    font-family: var(--font);
+    background: var(--color-bg);
+    color: var(--color-text);
+    line-height: 1.5;
+}
+
+a { color: var(--color-primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---- Topbar ---- */
+.topbar {
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+.topbar-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.brand {
+    font-weight: 700;
+    font-size: 1.15rem;
+    color: var(--color-primary-dark);
+}
+.topnav {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 0.95rem;
+}
+.nav-user { color: var(--color-text-muted); }
+.btn-link {
+    background: var(--color-primary);
+    color: #fff !important;
+    padding: 6px 14px;
+    border-radius: var(--radius);
+}
+.btn-link:hover { background: var(--color-primary-dark); text-decoration: none; }
+
+/* ---- Layout ---- */
+.app-main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 20px 60px;
+    min-height: 60vh;
+}
+.app-footer {
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+    padding: 24px 20px;
+}
+
+/* ---- Cards ---- */
+.card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow);
+}
+.card + .card { margin-top: 16px; }
+
+.grid {
+    display: grid;
+    gap: 16px;
+}
+.grid-2 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.grid-3 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+
+/* ---- Forms ---- */
+.form-narrow {
+    max-width: 420px;
+    margin: 0 auto;
+}
+label {
+    display: block;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 6px;
+    margin-top: 16px;
+}
+input[type=text], input[type=email], input[type=password], select, textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-family: inherit;
+}
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+.btn {
+    display: inline-block;
+    background: var(--color-primary);
+    color: #fff;
+    border: none;
+    padding: 11px 20px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 20px;
+}
+.btn:hover { background: var(--color-primary-dark); }
+.btn-secondary {
+    background: transparent;
+    color: var(--color-primary);
+    border: 1px solid var(--color-primary);
+}
+.btn-secondary:hover { background: var(--color-primary-light); }
+
+/* ---- Alerts ---- */
+.alert {
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    margin-bottom: 16px;
+}
+.alert-error { background: #FDECEA; color: var(--color-danger); border: 1px solid #F5C6C0; }
+.alert-success { background: #E7F6EE; color: var(--color-success); border: 1px solid #BFE6D1; }
+
+/* ---- Misc ---- */
+.text-muted { color: var(--color-text-muted); }
+.stat-number { font-size: 2rem; font-weight: 700; color: var(--color-primary-dark); }
+.stat-label { color: var(--color-text-muted); font-size: 0.85rem; }
+.empty-state { text-align: center; padding: 40px 20px; color: var(--color-text-muted); }
+
+@media (max-width: 600px) {
+    .topbar-inner { flex-direction: column; align-items: flex-start; }
+}
