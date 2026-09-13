@@ -62,7 +62,7 @@ require __DIR__ . '/../includes/header.php';
 ?>
 <h1>Panel del profesor</h1>
 
-<p><a class="btn" href="activities.php">Actividades interactivas</a></p>
+<p><a class="btn" href="activities.php">Actividades interactivas</a> <a class="btn btn-secondary" href="assignments.php">Asignaciones</a></p>
 
 <section class="grid grid-3">
     <div class="card">

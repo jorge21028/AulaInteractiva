@@ -11,6 +11,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/game_helpers.php';
+require_once __DIR__ . '/../../includes/assignment_helpers.php';
 
 header('Content-Type: application/json; charset=utf-8');
 require_role('teacher');
@@ -44,6 +45,7 @@ if ($action === 'finish') {
     $stmt = $pdo->prepare("UPDATE games SET status = 'finished', finished_at = :finished_at WHERE id = :id");
     $stmt->execute(['finished_at' => now_datetime(), 'id' => $game['id']]);
     audit_log($pdo, current_user_id(), 'game_finish', "Partida {$code} finalizada manualmente");
+    assignment_sync_from_game($pdo, (int) $game['id']);
     json_response(['success' => true, 'status' => 'finished']);
 }
 
@@ -58,5 +60,9 @@ if ($game['status'] === 'question') {
 
 $game = game_advance($pdo, $game, $questions);
 audit_log($pdo, current_user_id(), 'game_advance', "Partida {$code} avanzó a índice {$game['current_question_index']}");
+
+if ($game['status'] === 'finished') {
+    assignment_sync_from_game($pdo, (int) $game['id']);
+}
 
 json_response(['success' => true, 'status' => $game['status'], 'current_question_index' => (int) $game['current_question_index']]);
