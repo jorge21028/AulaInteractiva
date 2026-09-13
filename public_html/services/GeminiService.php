@@ -40,13 +40,11 @@ class GeminiService
     public static function generateActivity(array $params): array
     {
         if (!defined('GEMINI_API_KEY') || GEMINI_API_KEY === '') {
-            error_log('GeminiService: falta GEMINI_API_KEY en config/env.php');
-            return self::fail();
+            return self::fail('Falta configurar GEMINI_API_KEY en config/env.php (está vacía).');
         }
 
         if (!function_exists('curl_init')) {
-            error_log('GeminiService: la extensión curl no está disponible en este servidor.');
-            return self::fail();
+            return self::fail('La extensión curl de PHP no está habilitada en este servidor.');
         }
 
         $cantidad = max(1, min(self::MAX_QUESTIONS, (int) ($params['cantidad'] ?? 10)));
@@ -78,37 +76,48 @@ class GeminiService
         ];
 
         $rawResponse = self::callGemini($requestBody);
-        if ($rawResponse === null) {
-            return self::fail();
+        if (is_string($rawResponse)) {
+            // callGemini devolvió un mensaje de error en vez de la respuesta.
+            return self::fail($rawResponse);
         }
 
         $activityJson = self::extractTextFromResponse($rawResponse);
         if ($activityJson === null) {
-            error_log('GeminiService: respuesta de Gemini sin contenido de texto esperado.');
-            return self::fail();
+            $preview = substr(json_encode($rawResponse), 0, 300);
+            return self::fail("Gemini respondió sin el contenido esperado. Respuesta cruda: {$preview}");
         }
 
         $decoded = json_decode($activityJson, true);
         if (!is_array($decoded)) {
-            error_log('GeminiService: no se pudo decodificar el JSON devuelto por Gemini.');
-            return self::fail();
+            $preview = substr($activityJson, 0, 300);
+            return self::fail("No se pudo decodificar el JSON devuelto por Gemini. Texto recibido: {$preview}");
         }
 
         [$isValid, $errorMessage, $cleaned] = self::validateAndClean($decoded);
         if (!$isValid) {
-            error_log('GeminiService: estructura JSON inválida — ' . $errorMessage);
-            return self::fail();
+            return self::fail("Estructura JSON inválida: {$errorMessage}");
         }
 
         return ['success' => true, 'data' => $cleaned, 'error' => null];
     }
 
-    private static function fail(): array
+    private static function fail(string $debugDetail = ''): array
     {
+        $message = 'No fue posible generar la actividad. Intenta nuevamente.';
+
+        // Solo en entorno local se agrega el detalle técnico, para poder
+        // diagnosticar sin exponer errores internos a usuarios reales.
+        if (defined('APP_ENV') && APP_ENV === 'local' && $debugDetail !== '') {
+            error_log('GeminiService: ' . $debugDetail);
+            $message .= ' [DEBUG: ' . $debugDetail . ']';
+        } elseif ($debugDetail !== '') {
+            error_log('GeminiService: ' . $debugDetail);
+        }
+
         return [
             'success' => false,
             'data' => null,
-            'error' => 'No fue posible generar la actividad. Intenta nuevamente.',
+            'error' => $message,
         ];
     }
 
@@ -183,7 +192,11 @@ PROMPT;
         ];
     }
 
-    private static function callGemini(array $requestBody): ?array
+    /**
+     * @return array|string Array con la respuesta decodificada si todo salió bien,
+     *                       o un string con el detalle del error si algo falló.
+     */
+    private static function callGemini(array $requestBody)
     {
         $url = sprintf(self::ENDPOINT_TEMPLATE, rawurlencode(GEMINI_MODEL), GEMINI_API_KEY);
 
@@ -199,21 +212,24 @@ PROMPT;
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErrno = curl_errno($ch);
         $curlError = curl_error($ch);
         curl_close($ch);
 
         if ($response === false) {
-            error_log('GeminiService: error de red — ' . $curlError);
-            return null;
+            return "Error de red al contactar Gemini (curl errno {$curlErrno}): {$curlError}";
         }
 
         if ($httpCode < 200 || $httpCode >= 300) {
-            error_log("GeminiService: Gemini respondió HTTP {$httpCode} — " . substr((string) $response, 0, 500));
-            return null;
+            return "Gemini respondió HTTP {$httpCode}: " . substr((string) $response, 0, 500);
         }
 
         $decoded = json_decode($response, true);
-        return is_array($decoded) ? $decoded : null;
+        if (!is_array($decoded)) {
+            return 'La respuesta de Gemini no es JSON válido: ' . substr((string) $response, 0, 300);
+        }
+
+        return $decoded;
     }
 
     private static function extractTextFromResponse(array $response): ?string
