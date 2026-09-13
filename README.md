@@ -4,27 +4,22 @@ Plataforma educativa web independiente: actividades interactivas (tipo Kahoot/Ed
 
 Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks pesados. Compatible con hosting gratuito PHP/MySQL (InfinityFree).
 
-## Estado actual: FASE 2 completada
+## Estado actual: FASE 3 completada
 
-**Fase 1:**
-- Estructura del proyecto.
-- Base de datos (usuarios, roles, cursos, asignaturas, inscripciones, auditoría).
-- Autenticación: registro, login, logout, sesiones seguras, CSRF.
-- Roles: profesor, estudiante (admin reservado para fases futuras).
-- Panel del profesor: crear cursos, crear asignaturas, inscribir estudiantes por correo.
-- Panel del estudiante: ver sus cursos y asignaturas.
+**Fase 1:** estructura, autenticación, roles, cursos y asignaturas.
+**Fase 2:** actividades interactivas manuales y partidas en vivo con polling.
 
-**Fase 2 — Actividades interactivas y partidas en vivo:**
-- Creación manual de actividades (selección múltiple y verdadero/falso), con preguntas, opciones, tiempo y puntos configurables.
-- Publicación de actividades (borrador → publicada).
-- Partidas en vivo con código de acceso de 6 dígitos.
-- Sincronización en tiempo real mediante polling (fetch cada 1.5–2 segundos), sin WebSockets — compatible con InfinityFree.
-- Pantalla del profesor (control de la partida: iniciar, siguiente pregunta, ver resultados, finalizar).
-- Pantalla de proyección pública (código, pregunta, temporizador, resultados, ranking).
-- Pantalla del estudiante (unirse con código, responder, ver retroalimentación).
-- Sistema de puntuación: puntos base + bonificación por rapidez, configurable por actividad.
-- Avance automático de pregunta cuando se agota el tiempo, incluso si el profesor no interactúa.
-- Todo el flujo fue probado de extremo a extremo (registro → curso → actividad → partida → respuestas → ranking final) en un entorno local con MySQL real antes de la entrega.
+**Fase 3 — Generación de actividades con Google Gemini:**
+- Botón "Generar con Gemini" en el panel del profesor, con formulario (asignatura, tema, descripción, objetivo, cantidad de preguntas, dificultad, tipo, tiempo por pregunta, instrucciones adicionales).
+- `services/GeminiService.php`: único punto de contacto con la API de Gemini, aislado para poder cambiar de proveedor de IA en el futuro sin tocar el resto del sistema.
+- La API Key de Gemini vive solo en `config/env.php` (servidor), nunca llega al navegador.
+- Arquitectura: Navegador → PHP (`api/gemini/generate.php`) → Gemini API → PHP → Navegador.
+- Salida estructurada en JSON mediante `responseSchema` de Gemini (no texto libre que haya que interpretar).
+- Validación estricta del JSON antes de mostrarlo o guardarlo: título obligatorio, al menos una pregunta válida, exactamente una opción correcta por pregunta (autocorregido si el modelo se equivoca), tiempo y puntos acotados a rangos razonables.
+- El profesor **siempre** revisa la vista previa en pantalla antes de guardar nada.
+- Al guardar, la actividad se crea como **borrador** (`status = 'draft'`, `source = 'gemini'`) — Gemini nunca publica ni controla partidas.
+- Si Gemini falla (sin API key, error de red, JSON inválido, etc.), el usuario ve siempre el mismo mensaje genérico: "No fue posible generar la actividad. Intenta nuevamente." — nunca se exponen errores internos ni la API Key.
+- Todo el flujo (validación de estructura JSON con casos límite, y guardado de una actividad ya generada) fue probado antes de la entrega. La llamada real a la API de Gemini debe probarse con tu propia API Key, ya que no fue posible desde el entorno de desarrollo.
 
 ## Requisitos
 
@@ -40,14 +35,15 @@ Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks 
    `mysql -u root -p aulainteractiva < database/schema_fase1.sql`
    `mysql -u root -p aulainteractiva < database/schema_fase2.sql`
 4. Copia `public_html/config/env.example.php` como `public_html/config/env.php` y completa tus credenciales locales.
-5. Abre `http://localhost/aulainteractiva/index.php` en el navegador.
-6. Regístrate como profesor y como estudiante (dos cuentas distintas) para probar ambos flujos.
+5. Para probar la Fase 3, obtén una API Key gratuita en [Google AI Studio](https://aistudio.google.com/apikey) y colócala en `GEMINI_API_KEY` dentro de `env.php`. Sin esto, todo lo demás funciona igual; solo el botón "Generar con Gemini" mostrará el mensaje de error genérico.
+6. Abre `http://localhost/aulainteractiva/index.php` en el navegador.
+7. Regístrate como profesor y como estudiante (dos cuentas distintas) para probar ambos flujos.
 
 ## Despliegue en InfinityFree
 
 1. Crea tu cuenta y hosting en InfinityFree, y una base de datos MySQL desde el panel (vhost/cPanel).
 2. Sube el contenido de `public_html/` (no la carpeta en sí, sino su contenido) a la carpeta `htdocs` de tu hosting, vía Administrador de Archivos o FTP.
-3. En `config/env.php` (créalo en el servidor a partir de `env.example.php`) coloca las credenciales MySQL que InfinityFree te asigna (host, nombre de base de datos, usuario, contraseña).
+3. En `config/env.php` (créalo en el servidor a partir de `env.example.php`) coloca las credenciales MySQL que InfinityFree te asigna (host, nombre de base de datos, usuario, contraseña), y tu `GEMINI_API_KEY` si quieres usar la generación con IA.
 4. Importa `database/schema_fase1.sql` y luego `database/schema_fase2.sql` desde phpMyAdmin de InfinityFree.
 5. Ajusta `APP_URL` y `APP_ENV=production` en `env.php`.
 6. Visita tu dominio y prueba registro/login.
@@ -58,15 +54,21 @@ Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks 
 public_html/
   assets/          CSS, JS, imágenes, iconos
   config/          config.php, database.php, env.php (no versionado)
-  includes/        auth.php, security.php, functions.php, header.php, footer.php
-  api/             endpoints REST internos (se irán llenando por fase)
-  teacher/         panel y páginas del profesor
+  includes/        auth.php, security.php, functions.php, header.php, footer.php, game_helpers.php
+  services/        GeminiService.php (único punto de contacto con la IA)
+  api/
+    games/         state.php, host_action.php, join.php, answer.php (partidas en vivo)
+    gemini/        generate.php (generación de actividades con IA)
+  teacher/         panel y páginas del profesor (cursos, actividades, partidas, generación con IA)
   student/         panel y páginas del estudiante
-  game/ editor/ projector/   reservados para fases futuras
+  game/            unirse y jugar una partida (estudiante)
+  projector/       pantalla de proyección para el salón
+  editor/          reservado para fases futuras (creación académica)
   uploads/         archivos subidos por usuarios (protegido contra ejecución de scripts)
   index.php login.php register.php logout.php
 database/
   schema_fase1.sql
+  schema_fase2.sql
 ```
 
 ## Seguridad implementada en Fase 1
@@ -81,4 +83,4 @@ database/
 
 ## Próximo paso recomendado
 
-FASE 3: integración con Google Gemini para generar preguntas de actividades interactivas (el profesor sigue revisando y publicando manualmente; Gemini nunca publica ni controla partidas).
+FASE 4: asignaciones, entregas y calificaciones (el profesor asigna actividades — interactivas o de creación académica — a sus estudiantes con fecha de entrega; el estudiante ve "actividades pendientes" y entrega; el profesor califica).

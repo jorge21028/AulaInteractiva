@@ -90,6 +90,10 @@ require __DIR__ . '/../includes/header.php';
 <?php else: ?>
     <section class="card">
         <h2 style="margin-top:0;">Crear nueva actividad</h2>
+        <p class="text-muted" style="margin-top:-8px;">
+            Puedes crearla manualmente aquí, o
+            <a href="activity_generate.php">generar las preguntas con Gemini</a> y luego revisarlas.
+        </p>
         <form method="post" action="activities.php" class="form-narrow" style="margin:0;">
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="create_activity">
