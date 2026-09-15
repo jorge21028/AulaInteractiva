@@ -109,6 +109,7 @@ function render(data) {
         panel.innerHTML = `
             <h2 style="margin-top:0;">Pregunta ${g.current_question_index + 1} de ${g.total_questions}</h2>
             <p style="font-size:1.2rem;">${q.statement}</p>
+            ${q.image_url ? `<img src="${q.image_url}" style="max-width:100%; max-height:200px; border-radius:8px; display:block; margin:8px auto;">` : ''}
             <p class="text-muted">Tiempo restante: ${q.time_remaining}s · Respondieron: ${q.answered_count} de ${g.players_count}</p>
             <button class="btn" id="btn-results">Ver resultados ahora</button>
         `;

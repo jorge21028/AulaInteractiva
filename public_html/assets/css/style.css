@@ -160,3 +160,11 @@ input:focus, select:focus, textarea:focus {
 @media (max-width: 600px) {
     .topbar-inner { flex-direction: column; align-items: flex-start; }
 }
+
+/* ---- Impresión / exportar a PDF (usa el diálogo de impresión del navegador) ---- */
+@media print {
+    .no-print { display: none !important; }
+    body { background: #fff; }
+    .card { box-shadow: none; border: 1px solid #ddd; }
+    .app-main { padding: 0; max-width: 100%; }
+}

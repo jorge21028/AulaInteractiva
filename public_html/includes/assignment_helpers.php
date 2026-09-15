@@ -18,23 +18,25 @@ function assignment_create(
     PDO $pdo,
     int $teacherId,
     int $subjectId,
-    int $activityId,
+    ?int $activityId,
     string $title,
     string $description,
     ?string $startDate,
     ?string $dueDate,
-    int $points
+    int $points,
+    ?string $projectType = null
 ): int {
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare(
-            'INSERT INTO assignments (teacher_id, subject_id, activity_id, title, description, start_date, due_date, points, created_at)
-             VALUES (:teacher_id, :subject_id, :activity_id, :title, :description, :start_date, :due_date, :points, :created_at)'
+            'INSERT INTO assignments (teacher_id, subject_id, activity_id, project_type, title, description, start_date, due_date, points, created_at)
+             VALUES (:teacher_id, :subject_id, :activity_id, :project_type, :title, :description, :start_date, :due_date, :points, :created_at)'
         );
         $stmt->execute([
             'teacher_id'  => $teacherId,
             'subject_id'  => $subjectId,
             'activity_id' => $activityId,
+            'project_type'=> $projectType,
             'title'       => $title,
             'description' => $description,
             'start_date'  => $startDate ?: null,

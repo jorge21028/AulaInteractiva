@@ -134,7 +134,77 @@ require __DIR__ . '/../includes/header.php';
 
             <button type="submit" class="btn">Guardar</button>
         </form>
+
+        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--color-border);">
+            <label style="margin-top:0;">Imagen de la pregunta (opcional)</label>
+            <div id="question-image-preview" style="margin-bottom:10px;">
+                <?php if ($question['image_path']): ?>
+                    <img src="<?= e(rtrim(APP_URL, '/')) ?>/<?= e($question['image_path']) ?>" style="max-width:100%; max-height:200px; border-radius:8px; display:block;">
+                <?php else: ?>
+                    <p class="text-muted" style="font-size:0.85rem;">Sin imagen.</p>
+                <?php endif; ?>
+            </div>
+            <input type="file" id="question-image-file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none;">
+            <button type="button" class="btn btn-secondary" id="btn-upload-question-image" style="margin:0;">Subir imagen</button>
+            <button type="button" class="btn btn-secondary" id="btn-remove-question-image" style="margin:0; <?= $question['image_path'] ? '' : 'display:none;' ?>">Quitar imagen</button>
+            <span class="text-muted" id="question-image-status" style="font-size:0.85rem; display:block; margin-top:6px;"></span>
+        </div>
     </section>
+
+    <script>
+    const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;
+    const QUESTION_ID = <?= (int) $questionId ?>;
+    const CSRF_TOKEN = <?= json_encode(csrf_token()) ?>;
+
+    document.getElementById('btn-upload-question-image').addEventListener('click', () => {
+        document.getElementById('question-image-file').click();
+    });
+
+    document.getElementById('question-image-file').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const statusEl = document.getElementById('question-image-status');
+        statusEl.textContent = 'Subiendo...';
+
+        const formData = new FormData();
+        formData.append('image', file);
+        formData.append('question_id', QUESTION_ID);
+        formData.append('action', 'upload');
+        formData.append('csrf_token', CSRF_TOKEN);
+
+        try {
+            const res = await fetch(`${AULA_APP_URL}/api/activities/upload_question_image.php`, { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.success) {
+                document.getElementById('question-image-preview').innerHTML =
+                    `<img src="${data.image_url}" style="max-width:100%; max-height:200px; border-radius:8px; display:block;">`;
+                document.getElementById('btn-remove-question-image').style.display = 'inline-block';
+                statusEl.textContent = 'Imagen guardada.';
+            } else {
+                statusEl.textContent = data.message || 'No se pudo subir la imagen.';
+            }
+        } catch (err) {
+            statusEl.textContent = 'No se pudo subir la imagen (revisa tu conexión).';
+        }
+        e.target.value = '';
+    });
+
+    document.getElementById('btn-remove-question-image').addEventListener('click', async () => {
+        if (!confirm('¿Quitar la imagen de esta pregunta?')) return;
+        const formData = new FormData();
+        formData.append('question_id', QUESTION_ID);
+        formData.append('action', 'remove');
+        formData.append('csrf_token', CSRF_TOKEN);
+
+        const res = await fetch(`${AULA_APP_URL}/api/activities/upload_question_image.php`, { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.success) {
+            document.getElementById('question-image-preview').innerHTML = '<p class="text-muted" style="font-size:0.85rem;">Sin imagen.</p>';
+            document.getElementById('btn-remove-question-image').style.display = 'none';
+            document.getElementById('question-image-status').textContent = 'Imagen eliminada.';
+        }
+    });
+    </script>
 
     <section class="card">
         <h2 style="margin-top:0;">Opciones de respuesta</h2>

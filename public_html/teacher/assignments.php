@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/assignment_helpers.php';
+require_once __DIR__ . '/../includes/project_helpers.php';
 
 require_role('teacher');
 
@@ -32,33 +33,63 @@ $activities = $actStmt->fetchAll();
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_assignment') {
     csrf_verify($_POST['csrf_token'] ?? null);
 
-    $activityId = (int) ($_POST['activity_id'] ?? 0);
+    $mode = clean_string($_POST['mode'] ?? 'interactive'); // 'interactive' | 'creation'
     $title = clean_string($_POST['title'] ?? '');
     $description = clean_string($_POST['description'] ?? '');
     $startDate = clean_string($_POST['start_date'] ?? '');
     $dueDate = clean_string($_POST['due_date'] ?? '');
     $points = max(1, (int) ($_POST['points'] ?? 100));
 
-    $activity = null;
-    foreach ($activities as $a) {
-        if ((int) $a['id'] === $activityId) {
-            $activity = $a;
-            break;
+    $activityId = null;
+    $projectType = null;
+    $subjectId = null;
+
+    if ($mode === 'interactive') {
+        $activityId = (int) ($_POST['activity_id'] ?? 0);
+        $activity = null;
+        foreach ($activities as $a) {
+            if ((int) $a['id'] === $activityId) {
+                $activity = $a;
+                break;
+            }
+        }
+        if (!$activity) {
+            $errors[] = 'Selecciona una actividad publicada válida.';
+        } else {
+            $subjectId = (int) $activity['subject_id'];
+        }
+    } else {
+        $projectType = clean_string($_POST['project_type'] ?? '');
+        $subjectId = (int) ($_POST['subject_id_creation'] ?? 0);
+
+        if (!array_key_exists($projectType, PROJECT_TYPES)) {
+            $errors[] = 'Selecciona un tipo de trabajo válido.';
+        }
+        $validSubject = false;
+        foreach ($subjects as $s) {
+            if ((int) $s['id'] === $subjectId) {
+                $validSubject = true;
+                break;
+            }
+        }
+        if (!$validSubject) {
+            $errors[] = 'Selecciona una asignatura válida.';
         }
     }
 
-    if (!$activity) {
-        $errors[] = 'Selecciona una actividad publicada válida.';
-    } elseif ($title === '') {
+    if ($title === '') {
         $errors[] = 'El título no puede estar vacío.';
-    } else {
+    }
+
+    if (empty($errors)) {
         try {
             $assignmentId = assignment_create(
-                $pdo, $teacherId, (int) $activity['subject_id'], $activityId,
+                $pdo, $teacherId, $subjectId, $activityId,
                 $title, $description,
                 $startDate !== '' ? $startDate . ' 00:00:00' : null,
                 $dueDate !== '' ? $dueDate . ' 23:59:59' : null,
-                $points
+                $points,
+                $projectType
             );
             audit_log($pdo, $teacherId, 'create_assignment', "Asignación '{$title}' creada");
             redirect('teacher/assignment_detail.php?id=' . $assignmentId);
@@ -70,11 +101,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
 }
 
 $listStmt = $pdo->prepare(
-    'SELECT a.id, a.title, a.due_date, a.points, act.title AS activity_title, s.name AS subject_name,
+    'SELECT a.id, a.title, a.due_date, a.points, a.project_type, act.title AS activity_title, s.name AS subject_name,
         (SELECT COUNT(*) FROM assignment_students ast WHERE ast.assignment_id = a.id) AS total_students,
         (SELECT COUNT(*) FROM submissions sub WHERE sub.assignment_id = a.id AND sub.status = "completed") AS completed_count
      FROM assignments a
-     INNER JOIN activities act ON act.id = a.activity_id
+     LEFT JOIN activities act ON act.id = a.activity_id
      INNER JOIN subjects s ON s.id = a.subject_id
      WHERE a.teacher_id = :teacher_id
      ORDER BY a.created_at DESC'
@@ -92,27 +123,68 @@ require __DIR__ . '/../includes/header.php';
     <div class="alert alert-error"><?= e($error) ?></div>
 <?php endforeach; ?>
 
-<?php if (empty($activities)): ?>
+<?php if (empty($subjects)): ?>
     <div class="card">
-        <p>Necesitas al menos una actividad <strong>publicada</strong> antes de poder asignarla.</p>
-        <a class="btn" href="activities.php">Ir a mis actividades</a>
+        <p>Necesitas al menos una asignatura antes de crear asignaciones.</p>
+        <a class="btn" href="dashboard.php">Ir a mis cursos</a>
     </div>
 <?php else: ?>
     <section class="card">
         <h2 style="margin-top:0;">Nueva asignación</h2>
+
+        <div style="display:flex; gap:16px; margin-bottom:16px;">
+            <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;">
+                <input type="radio" name="mode_selector" value="interactive" checked style="width:auto;" onclick="toggleMode('interactive')">
+                Actividad interactiva
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;">
+                <input type="radio" name="mode_selector" value="creation" style="width:auto;" onclick="toggleMode('creation')">
+                Trabajo de creación
+            </label>
+        </div>
+
         <form method="post" action="assignments.php" class="form-narrow" style="margin:0;">
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="create_assignment">
+            <input type="hidden" name="mode" id="mode_field" value="interactive">
 
-            <label for="activity_id">Actividad (debe estar publicada)</label>
-            <select id="activity_id" name="activity_id" required>
-                <?php foreach ($activities as $a): ?>
-                    <option value="<?= (int) $a['id'] ?>"><?= e($a['title']) ?></option>
-                <?php endforeach; ?>
-            </select>
+            <div id="mode-interactive">
+                <?php if (empty($activities)): ?>
+                    <p class="text-muted">No tienes actividades publicadas todavía. <a href="activities.php">Crea una</a>.</p>
+                <?php else: ?>
+                    <label for="activity_id">Actividad (debe estar publicada)</label>
+                    <select id="activity_id" name="activity_id">
+                        <?php foreach ($activities as $a): ?>
+                            <option value="<?= (int) $a['id'] ?>"><?= e($a['title']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <p class="text-muted" style="font-size:0.8rem;">
+                        Se juega en vivo: tú inicias la partida cuando quieras y la entrega se califica sola.
+                    </p>
+                <?php endif; ?>
+            </div>
+
+            <div id="mode-creation" style="display:none;">
+                <label for="project_type">Tipo de trabajo</label>
+                <select id="project_type" name="project_type">
+                    <?php foreach (PROJECT_TYPES as $val => $label): ?>
+                        <option value="<?= e($val) ?>"><?= e($label) ?></option>
+                    <?php endforeach; ?>
+                </select>
+
+                <label for="subject_id_creation">Asignatura</label>
+                <select id="subject_id_creation" name="subject_id_creation">
+                    <?php foreach ($subjects as $s): ?>
+                        <option value="<?= (int) $s['id'] ?>"><?= e($s['course_name']) ?> — <?= e($s['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <p class="text-muted" style="font-size:0.8rem;">
+                    El estudiante trabaja a su ritmo hasta la fecha de entrega. Tú calificas manualmente.
+                </p>
+            </div>
 
             <label for="title">Título de la asignación</label>
-            <input type="text" id="title" name="title" required placeholder="Ej: Quiz de fracciones - Unidad 3">
+            <input type="text" id="title" name="title" required placeholder="Ej: Resumen sobre sistemas operativos">
 
             <label for="description">Descripción / instrucciones</label>
             <textarea id="description" name="description" rows="2"></textarea>
@@ -128,7 +200,7 @@ require __DIR__ . '/../includes/header.php';
 
             <button type="submit" class="btn">Crear asignación</button>
             <p class="text-muted" style="font-size:0.8rem; margin-top:8px;">
-                Se asignará automáticamente a todos los estudiantes inscritos en la asignatura de esa actividad.
+                Se asignará automáticamente a todos los estudiantes inscritos en la asignatura.
             </p>
         </form>
     </section>
@@ -142,7 +214,10 @@ require __DIR__ . '/../includes/header.php';
                 <?php foreach ($assignments as $a): ?>
                     <a class="card" href="assignment_detail.php?id=<?= (int) $a['id'] ?>" style="display:block;">
                         <h3 style="margin-top:0;"><?= e($a['title']) ?></h3>
-                        <p class="text-muted" style="margin-bottom:4px;"><?= e($a['subject_name']) ?> · <?= e($a['activity_title']) ?></p>
+                        <p class="text-muted" style="margin-bottom:4px;">
+                            <?= e($a['subject_name']) ?> ·
+                            <?= $a['activity_title'] ? e($a['activity_title']) : e(PROJECT_TYPES[$a['project_type']] ?? 'Trabajo') ?>
+                        </p>
                         <p class="text-muted" style="margin-bottom:0; font-size:0.85rem;">
                             <?= (int) $a['completed_count'] ?> / <?= (int) $a['total_students'] ?> completadas ·
                             <?= (int) $a['points'] ?> pts
@@ -155,5 +230,13 @@ require __DIR__ . '/../includes/header.php';
             </div>
         <?php endif; ?>
     </section>
+
+    <script>
+    function toggleMode(mode) {
+        document.getElementById('mode_field').value = mode;
+        document.getElementById('mode-interactive').style.display = mode === 'interactive' ? 'block' : 'none';
+        document.getElementById('mode-creation').style.display = mode === 'creation' ? 'block' : 'none';
+    }
+    </script>
 <?php endif; ?>
 <?php require __DIR__ . '/../includes/footer.php'; ?>

@@ -13,7 +13,7 @@ $pageTitle = $pageTitle ?? APP_NAME;
 <link rel="stylesheet" href="<?= e(rtrim(APP_URL, '/')) ?>/assets/css/style.css">
 </head>
 <body>
-<header class="topbar">
+<header class="topbar no-print">
     <div class="topbar-inner">
         <a class="brand" href="<?= e(rtrim(APP_URL, '/')) ?>/index.php">AulaInteractiva</a>
         <nav class="topnav">

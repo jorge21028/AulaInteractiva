@@ -2,6 +2,7 @@
 define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/project_helpers.php';
 
 require_role('teacher');
 
@@ -12,9 +13,9 @@ $notice = null;
 $errors = [];
 
 $stmt = $pdo->prepare(
-    'SELECT a.*, act.title AS activity_title, act.id AS activity_id, s.name AS subject_name
+    'SELECT a.*, act.id AS activity_id, act.title AS activity_title, s.name AS subject_name
      FROM assignments a
-     INNER JOIN activities act ON act.id = a.activity_id
+     LEFT JOIN activities act ON act.id = a.activity_id
      INNER JOIN subjects s ON s.id = a.subject_id
      WHERE a.id = :id AND a.teacher_id = :teacher_id LIMIT 1'
 );
@@ -51,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 }
 
 $rosterStmt = $pdo->prepare(
-    'SELECT sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at,
+    'SELECT sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id,
         u.name AS student_name, u.email AS student_email
      FROM submissions sub
      INNER JOIN users u ON u.id = sub.student_id
@@ -67,7 +68,8 @@ require __DIR__ . '/../includes/header.php';
 <p><a href="assignments.php">&larr; Volver a asignaciones</a></p>
 <h1><?= e($assignment['title']) ?></h1>
 <p class="text-muted">
-    <?= e($assignment['subject_name']) ?> · Actividad: <?= e($assignment['activity_title']) ?> ·
+    <?= e($assignment['subject_name']) ?> ·
+    <?= $assignment['activity_title'] ? 'Actividad: ' . e($assignment['activity_title']) : e(PROJECT_TYPES[$assignment['project_type']] ?? 'Trabajo') ?> ·
     <?= (int) $assignment['points'] ?> pts
     <?php if ($assignment['due_date']): ?>
         · Entrega: <?= e(date('d/m/Y', strtotime($assignment['due_date']))) ?>
@@ -78,9 +80,11 @@ require __DIR__ . '/../includes/header.php';
     <div class="card"><?= nl2br(e($assignment['description'])) ?></div>
 <?php endif; ?>
 
+<?php if ($assignment['activity_id']): ?>
 <a class="btn" style="margin:16px 0; display:inline-block;" href="host.php?activity_id=<?= (int) $assignment['activity_id'] ?>">
     Iniciar partida de esta actividad
 </a>
+<?php endif; ?>
 
 <?php foreach ($errors as $error): ?>
     <div class="alert alert-error"><?= e($error) ?></div>
@@ -110,6 +114,9 @@ require __DIR__ . '/../includes/header.php';
                                 ⏳ Pendiente
                             <?php endif; ?>
                         </p>
+                        <?php if ($r['project_id']): ?>
+                            <a href="view_project.php?id=<?= (int) $r['project_id'] ?>" style="font-size:0.85rem;">Ver trabajo entregado &rarr;</a>
+                        <?php endif; ?>
                     </div>
                 </div>
 

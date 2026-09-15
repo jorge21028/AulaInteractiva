@@ -95,6 +95,7 @@ if ($game['status'] === 'question' && isset($questions[$idx])) {
         'time_seconds'   => (int) $q['time_seconds'],
         'time_remaining' => $remaining,
         'points'         => (int) $q['points'],
+        'image_url'      => $q['image_path'] ? rtrim(APP_URL, '/') . '/' . $q['image_path'] : null,
         'options'        => array_map(fn($o) => ['id' => (int) $o['id'], 'text' => $o['text']], $q['options']),
         'answered_count' => game_answered_count($pdo, (int) $game['id'], (int) $q['id']),
         'already_answered' => $myAnswer !== null,
@@ -137,6 +138,7 @@ if ($game['status'] === 'question_results' && isset($questions[$idx])) {
     $response['results'] = [
         'question_id'     => (int) $q['id'],
         'statement'        => $q['statement'],
+        'image_url'        => $q['image_path'] ? rtrim(APP_URL, '/') . '/' . $q['image_path'] : null,
         'explanation'      => $q['explanation'],
         'correct_option_id'=> $correctOption,
         'options'          => $optionsOut,

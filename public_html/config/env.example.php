@@ -25,4 +25,4 @@ define('APP_URL', 'http://localhost/aulainteractiva');
 
 // ---- Google Gemini ----
 define('GEMINI_API_KEY', 'coloca_aqui_tu_api_key');
-define('GEMINI_MODEL', 'gemini-1.5-flash');
+define('GEMINI_MODEL', 'gemini-3.5-flash');

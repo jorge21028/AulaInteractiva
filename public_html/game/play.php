@@ -90,9 +90,11 @@ function render(data) {
             const optionsHtml = q.options.map(o =>
                 `<div class="play-option" data-id="${o.id}">${o.text}</div>`
             ).join('');
+            const imageHtml = q.image_url ? `<img src="${q.image_url}" style="max-width:100%; max-height:220px; border-radius:8px; display:block; margin:10px auto;">` : '';
             panel.innerHTML = `
                 <p class="text-muted" style="text-align:center;">Pregunta ${g.current_question_index + 1} de ${g.total_questions}</p>
                 <h2 style="text-align:center;">${q.statement}</h2>
+                ${imageHtml}
                 <div class="play-timer">${q.time_remaining}s</div>
                 <div class="play-options">${optionsHtml}</div>
             `;

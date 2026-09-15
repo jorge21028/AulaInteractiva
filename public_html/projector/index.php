@@ -59,10 +59,12 @@ require __DIR__ . '/../includes/header.php';
         } else if (g.status === 'question') {
             const q = data.question;
             const optionsHtml = q.options.map(o => `<div class="projector-option">${o.text}</div>`).join('');
+            const imageHtml = q.image_url ? `<img src="${q.image_url}" style="max-width:100%; max-height:280px; border-radius:8px; display:block; margin:10px auto;">` : '';
             panel.innerHTML = `
                 <div class="card">
                     <p class="text-muted" style="text-align:center;">Pregunta ${g.current_question_index + 1} de ${g.total_questions}</p>
                     <div class="projector-question">${q.statement}</div>
+                    ${imageHtml}
                     <div class="projector-timer">${q.time_remaining}s</div>
                     <div class="projector-options" style="margin-top:20px;">${optionsHtml}</div>
                     <p style="text-align:center; margin-top:16px;" class="text-muted">Respondieron ${q.answered_count} de ${g.players_count}</p>

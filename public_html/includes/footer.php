@@ -5,7 +5,7 @@ if (!defined('AULA_APP')) {
 }
 ?>
 </main>
-<footer class="app-footer">
+<footer class="app-footer no-print">
     <p>&copy; <?= date('Y') ?> AulaInteractiva. Fase 1 — base del proyecto.</p>
 </footer>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/main.js"></script>
