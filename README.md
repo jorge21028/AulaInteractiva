@@ -4,7 +4,7 @@ Plataforma educativa web independiente: actividades interactivas (tipo Kahoot/Ed
 
 Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks pesados. Compatible con hosting gratuito PHP/MySQL (InfinityFree).
 
-## Estado actual: FASE 7 completada
+## Estado actual: FASE 8 completada
 
 **Fase 1:** estructura, autenticación, roles, cursos y asignaturas.
 **Fase 2:** actividades interactivas manuales y partidas en vivo con polling.
@@ -126,8 +126,18 @@ database/
 - Todo lo anterior (subida y propagación de imagen de pregunta con control de acceso por rol, audio embebido con saneo de origen externo, y carga correcta de la página de estadísticas con conteos exactos) fue probado de extremo a extremo con base de datos real antes de la entrega.
 - **Limitación conocida**: igual que con el editor gráfico de la Fase 6, no pude probar visualmente la exportación a PNG/PDF ni la reproducción de audio/video en un navegador real desde este entorno — la lógica de datos y seguridad está verificada, pero te recomiendo probar tú mismo la experiencia final.
 
+## Fase 8 — Presentaciones (estilo PowerPoint) con modo de presentar
+
+- Nuevo tipo de trabajo de creación académica: **Presentación** (`presentacion`), quinto tipo sobre el mismo modelo `student_projects` — sin tablas nuevas.
+- Editor de varias diapositivas (`editor/presentacion.php`), reutilizando las mismas herramientas de Canvas/Fabric.js del editor gráfico (texto, formas, imágenes, colores, deshacer/rehacer): lista de diapositivas a la izquierda, lienzo de la diapositiva activa a la derecha (relación 16:9).
+- Gestión de diapositivas: **+ Diapositiva**, **Duplicar**, **Eliminar** (mínimo 1), reordenar con **↑ / ↓**. Al cambiar de diapositiva, el contenido de la anterior se guarda automáticamente en memoria antes de mostrar la siguiente.
+- **▶ Presentar**: modo de pantalla completa integrado en la misma página (sin recargar ni depender de otro archivo), con navegación por botones, flechas del teclado y barra espaciadora, y tecla Escape para salir. Disponible tanto mientras se edita como después de entregar, y también para el profesor al revisar el trabajo.
+- Mismas protecciones que el resto del editor gráfico: ancho/alto de cada diapositiva acotado, máximo de diapositivas (60) y de objetos por diapositiva (300), e imágenes restringidas solo a las que el propio estudiante subió (cualquier referencia externa se elimina al guardar).
+- Todo el flujo (autocreación del proyecto con una diapositiva en blanco, guardado de varias diapositivas con saneo activo de imagen externa y de dimensiones fuera de rango, entrega, bloqueo posterior de edición, y vista de solo lectura del profesor con su propio botón de presentar) fue probado de extremo a extremo con base de datos real antes de la entrega.
+- **Limitación conocida**: no pude probar visualmente el editor ni el modo de presentación en un navegador real (igual que con el resto de los editores basados en Fabric.js) — te recomiendo abrirlo y probar la experiencia tú mismo. Tampoco hay todavía transiciones animadas entre diapositivas ni plantillas prediseñadas.
+
 ## Alcance completo
 
-Con esto se cierran las 7 fases planeadas originalmente. La plataforma cubre: autenticación y roles, estructura académica (cursos/asignaturas), actividades interactivas en vivo con partidas por código, generación de actividades con IA (siempre revisada por el profesor), asignaciones con calificación automática y manual, y tres herramientas de creación académica para el estudiante (resúmenes, tablas comparativas, infografías y mapas mentales), con multimedia, exportación y estadísticas.
+Con esto se cierran las 7 fases planeadas originalmente, más la Fase 8 agregada a pedido. La plataforma cubre: autenticación y roles, estructura académica (cursos/asignaturas), actividades interactivas en vivo con partidas por código, generación de actividades con IA (siempre revisada por el profesor), asignaciones con calificación automática y manual, y cinco herramientas de creación académica para el estudiante (resúmenes, tablas comparativas, infografías, mapas mentales y presentaciones), con multimedia, exportación y estadísticas.
 
-Posibles ampliaciones futuras (no forman parte del alcance original en detalle, o quedaron como mejoras menores): presentaciones, fichas de estudio, más tipos de pregunta (relacionar, ordenar, completar espacios), modo por equipos, integración con Google Classroom/Moodle, y una versión verdaderamente asíncrona de las actividades interactivas (sin depender de una sesión en vivo).
+Posibles ampliaciones futuras: fichas de estudio, más tipos de pregunta (relacionar, ordenar, completar espacios — próxima entrega en curso), modo por equipos, integración con Google Classroom/Moodle, y una versión verdaderamente asíncrona de las actividades interactivas (sin depender de una sesión en vivo).

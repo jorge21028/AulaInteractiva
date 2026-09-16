@@ -44,6 +44,7 @@ $editorUrlByType = [
     'tabla_comparativa' => 'tabla.php',
     'infografia' => 'canvas.php',
     'mapa_mental' => 'canvas.php',
+    'presentacion' => 'presentacion.php',
 ];
 
 $pageTitle = $assignment['title'];

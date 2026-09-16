@@ -19,13 +19,20 @@ const PROJECT_TYPES = [
     'tabla_comparativa' => 'Tabla comparativa',
     'infografia' => 'Infografía',
     'mapa_mental' => 'Mapa mental',
+    'presentacion' => 'Presentación',
 ];
 
 /**
- * Tipos que usan el editor gráfico (Canvas/Fabric.js) en vez del editor
- * de texto o de tablas.
+ * Tipos que usan el editor gráfico (Canvas/Fabric.js) de una sola página
+ * en vez del editor de texto o de tablas.
  */
 const PROJECT_CANVAS_TYPES = ['infografia', 'mapa_mental'];
+
+/**
+ * Tipos que usan el editor de varias diapositivas (también Canvas/Fabric.js,
+ * pero con una lista de "slides" en vez de un único lienzo).
+ */
+const PROJECT_SLIDE_TYPES = ['presentacion'];
 
 /**
  * Estructura inicial vacía para un tipo de trabajo nuevo.
@@ -52,6 +59,11 @@ function project_default_data(string $type): array
             'backgroundColor' => '#ffffff',
             'objects' => [],
         ],
+        'presentacion' => [
+            'slides' => [
+                ['width' => 960, 'height' => 540, 'backgroundColor' => '#ffffff', 'objects' => []],
+            ],
+        ],
         default => [],
     };
 }
@@ -75,37 +87,68 @@ function project_sanitize_data(array $data, string $type = '', int $studentId = 
     }
 
     if (in_array($type, PROJECT_CANVAS_TYPES, true)) {
-        $data['width'] = max(200, min(3000, (int) ($data['width'] ?? 800)));
-        $data['height'] = max(200, min(3000, (int) ($data['height'] ?? 1200)));
+        $data = project_sanitize_canvas_layer($data);
+    }
 
-        if (!isset($data['backgroundColor']) || !is_string($data['backgroundColor'])) {
-            $data['backgroundColor'] = '#ffffff';
-        }
+    if (in_array($type, PROJECT_SLIDE_TYPES, true)) {
+        $slides = is_array($data['slides'] ?? null) ? $data['slides'] : [];
+        $slides = array_slice($slides, 0, 60); // límite razonable de diapositivas
 
-        $objects = is_array($data['objects'] ?? null) ? $data['objects'] : [];
-        $objects = array_slice($objects, 0, 300);
-
-        $uploadsPrefix = rtrim(APP_URL, '/') . '/uploads/images/';
-
-        foreach ($objects as $i => &$obj) {
-            if (!is_array($obj)) {
-                unset($objects[$i]);
+        $cleanSlides = [];
+        foreach ($slides as $slide) {
+            if (!is_array($slide)) {
                 continue;
             }
-            if (($obj['type'] ?? '') === 'image') {
-                $src = (string) ($obj['src'] ?? '');
-                if (!str_starts_with($src, $uploadsPrefix)) {
-                    // Imagen que no viene de nuestro propio endpoint de subida: descartar el objeto.
-                    unset($objects[$i]);
-                }
-            }
+            $cleanSlides[] = project_sanitize_canvas_layer($slide);
         }
-        unset($obj);
 
-        $data['objects'] = array_values($objects);
+        if (empty($cleanSlides)) {
+            $cleanSlides = project_default_data('presentacion')['slides'];
+        }
+
+        $data['slides'] = $cleanSlides;
     }
 
     return $data;
+}
+
+/**
+ * Sanea una sola "capa" tipo lienzo (ancho, alto, color de fondo y lista
+ * de objetos Fabric.js): se usa tanto para infografías/mapas mentales
+ * (una sola capa) como para cada diapositiva de una presentación.
+ */
+function project_sanitize_canvas_layer(array $layer): array
+{
+    $layer['width'] = max(200, min(3000, (int) ($layer['width'] ?? 800)));
+    $layer['height'] = max(200, min(3000, (int) ($layer['height'] ?? 1200)));
+
+    if (!isset($layer['backgroundColor']) || !is_string($layer['backgroundColor'])) {
+        $layer['backgroundColor'] = '#ffffff';
+    }
+
+    $objects = is_array($layer['objects'] ?? null) ? $layer['objects'] : [];
+    $objects = array_slice($objects, 0, 300);
+
+    $uploadsPrefix = rtrim(APP_URL, '/') . '/uploads/images/';
+
+    foreach ($objects as $i => &$obj) {
+        if (!is_array($obj)) {
+            unset($objects[$i]);
+            continue;
+        }
+        if (($obj['type'] ?? '') === 'image') {
+            $src = (string) ($obj['src'] ?? '');
+            if (!str_starts_with($src, $uploadsPrefix)) {
+                // Imagen que no viene de nuestro propio endpoint de subida: descartar el objeto.
+                unset($objects[$i]);
+            }
+        }
+    }
+    unset($obj);
+
+    $layer['objects'] = array_values($objects);
+
+    return $layer;
 }
 
 /**

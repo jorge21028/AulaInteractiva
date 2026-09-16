@@ -43,7 +43,7 @@ require __DIR__ . '/../includes/header.php';
 <div class="no-print" style="margin-bottom:16px;">
     <?php if (in_array($project['type'], PROJECT_CANVAS_TYPES, true)): ?>
         <button type="button" class="btn btn-secondary" id="btn-download-png" style="margin:0;">Descargar como PNG</button>
-    <?php else: ?>
+    <?php elseif ($project['type'] !== 'presentacion'): ?>
         <button type="button" class="btn btn-secondary" onclick="window.print()" style="margin:0;">Imprimir / Guardar como PDF</button>
     <?php endif; ?>
 </div>
@@ -93,6 +93,86 @@ require __DIR__ . '/../includes/header.php';
             a.href = dataUrl;
             a.download = <?= json_encode(preg_replace('/[^a-zA-Z0-9_-]+/', '_', $project['title']) . '.png') ?>;
             a.click();
+        });
+        </script>
+    <?php elseif ($project['type'] === 'presentacion'): ?>
+        <style>
+          #present-overlay { display:none; position:fixed; inset:0; background:#111; z-index:9999; align-items:center; justify-content:center; flex-direction:column; }
+          #present-overlay.active { display:flex; }
+          #present-controls { margin-top:16px; display:flex; gap:12px; align-items:center; color:#fff; }
+          #present-controls button { padding:10px 18px; border:none; border-radius:6px; background:#fff; cursor:pointer; }
+        </style>
+        <div class="no-print" style="margin-bottom:12px;">
+            <button type="button" class="btn" id="btn-present" style="margin:0;">▶ Presentar</button>
+        </div>
+        <div style="overflow:auto; border:1px solid var(--color-border); border-radius:8px; background:#EEF1F5; padding:20px; text-align:center;">
+            <canvas id="project-canvas"></canvas>
+        </div>
+        <p class="text-muted no-print" style="font-size:0.85rem; margin-top:8px;" id="slide-nav">
+            <button type="button" id="slide-prev" class="btn btn-secondary" style="margin:0; padding:4px 10px;">&larr;</button>
+            <span id="slide-counter">1 / 1</span>
+            <button type="button" id="slide-next" class="btn btn-secondary" style="margin:0; padding:4px 10px;">&rarr;</button>
+        </p>
+
+        <div id="present-overlay">
+            <canvas id="present-canvas"></canvas>
+            <div id="present-controls">
+                <button type="button" id="present-prev">&larr; Anterior</button>
+                <span id="present-counter">1 / 1</span>
+                <button type="button" id="present-next">Siguiente &rarr;</button>
+                <button type="button" id="present-close">✕ Cerrar</button>
+            </div>
+        </div>
+
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+        <script>
+        const slides = <?= json_encode($data['slides'] ?? []) ?>;
+        let viewIndex = 0;
+        const viewCanvas = new fabric.Canvas('project-canvas', { selection: false });
+
+        function renderViewSlide() {
+            const slide = slides[viewIndex];
+            viewCanvas.setWidth(slide.width || 960);
+            viewCanvas.setHeight(slide.height || 540);
+            viewCanvas.setBackgroundColor(slide.backgroundColor || '#ffffff', viewCanvas.renderAll.bind(viewCanvas));
+            viewCanvas.loadFromJSON({ objects: slide.objects || [] }, () => {
+                viewCanvas.forEachObject(o => { o.selectable = false; o.evented = false; });
+                viewCanvas.renderAll();
+            });
+            document.getElementById('slide-counter').textContent = `${viewIndex + 1} / ${slides.length}`;
+        }
+        document.getElementById('slide-prev').addEventListener('click', () => { if (viewIndex > 0) { viewIndex--; renderViewSlide(); } });
+        document.getElementById('slide-next').addEventListener('click', () => { if (viewIndex < slides.length - 1) { viewIndex++; renderViewSlide(); } });
+        renderViewSlide();
+
+        let presentIndex = 0;
+        let presentCanvas = null;
+        function openPresent() {
+            presentIndex = viewIndex;
+            document.getElementById('present-overlay').classList.add('active');
+            if (!presentCanvas) presentCanvas = new fabric.Canvas('present-canvas', { selection: false });
+            renderPresentSlide();
+        }
+        function renderPresentSlide() {
+            const slide = slides[presentIndex];
+            presentCanvas.setWidth(slide.width || 960);
+            presentCanvas.setHeight(slide.height || 540);
+            presentCanvas.setBackgroundColor(slide.backgroundColor || '#ffffff', presentCanvas.renderAll.bind(presentCanvas));
+            presentCanvas.loadFromJSON({ objects: slide.objects || [] }, () => {
+                presentCanvas.forEachObject(o => { o.selectable = false; o.evented = false; });
+                presentCanvas.renderAll();
+            });
+            document.getElementById('present-counter').textContent = `${presentIndex + 1} / ${slides.length}`;
+        }
+        document.getElementById('btn-present').addEventListener('click', openPresent);
+        document.getElementById('present-close').addEventListener('click', () => document.getElementById('present-overlay').classList.remove('active'));
+        document.getElementById('present-next').addEventListener('click', () => { if (presentIndex < slides.length - 1) { presentIndex++; renderPresentSlide(); } });
+        document.getElementById('present-prev').addEventListener('click', () => { if (presentIndex > 0) { presentIndex--; renderPresentSlide(); } });
+        document.addEventListener('keydown', (e) => {
+            if (!document.getElementById('present-overlay').classList.contains('active')) return;
+            if (e.key === 'ArrowRight' || e.key === ' ') document.getElementById('present-next').click();
+            if (e.key === 'ArrowLeft') document.getElementById('present-prev').click();
+            if (e.key === 'Escape') document.getElementById('present-overlay').classList.remove('active');
         });
         </script>
     <?php else: ?>
