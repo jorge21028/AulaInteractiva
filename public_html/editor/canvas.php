@@ -123,6 +123,16 @@ canvas.setHeight(INITIAL_DATA.height || 1200);
 canvas.setBackgroundColor(INITIAL_DATA.backgroundColor || '#ffffff', canvas.renderAll.bind(canvas));
 
 let isRestoring = true;
+let undoStack = [];
+let redoStack = [];
+
+function pushHistory() {
+    if (isRestoring) return;
+    undoStack.push(JSON.stringify(canvas.toJSON(CUSTOM_PROPS)));
+    if (undoStack.length > 60) undoStack.shift();
+    redoStack = [];
+}
+
 canvas.loadFromJSON({ objects: INITIAL_DATA.objects || [] }, () => {
     canvas.renderAll();
     isRestoring = false;
@@ -142,16 +152,6 @@ document.getElementById('btn-download-png').addEventListener('click', () => {
 });
 
 // ---- Historial (deshacer / rehacer) ----
-let undoStack = [];
-let redoStack = [];
-
-function pushHistory() {
-    if (isRestoring) return;
-    undoStack.push(JSON.stringify(canvas.toJSON(CUSTOM_PROPS)));
-    if (undoStack.length > 60) undoStack.shift();
-    redoStack = [];
-}
-
 function restoreState(jsonStr) {
     isRestoring = true;
     const parsed = JSON.parse(jsonStr);
