@@ -58,28 +58,50 @@ require __DIR__ . '/../includes/header.php';
             `;
         } else if (g.status === 'question') {
             const q = data.question;
-            const optionsHtml = q.options.map(o => `<div class="projector-option">${o.text}</div>`).join('');
             const imageHtml = q.image_url ? `<img src="${q.image_url}" style="max-width:100%; max-height:280px; border-radius:8px; display:block; margin:10px auto;">` : '';
+            let bodyHtml = '';
+            if (q.type === 'multiple' || q.type === 'truefalse') {
+                bodyHtml = `<div class="projector-options" style="margin-top:20px;">${q.options.map(o => `<div class="projector-option">${o.text}</div>`).join('')}</div>`;
+            } else if (q.type === 'ordenar') {
+                bodyHtml = `<div class="projector-options" style="margin-top:20px;">${q.items.map(i => `<div class="projector-option">${i.text}</div>`).join('')}</div>
+                    <p class="text-muted" style="text-align:center; margin-top:10px;">Ordénalos en el orden correcto</p>`;
+            } else if (q.type === 'relacionar') {
+                bodyHtml = `<div class="projector-options" style="margin-top:20px;">
+                    ${q.left_items.map(i => `<div class="projector-option">${i.text}</div>`).join('')}
+                    ${q.right_items.map(t => `<div class="projector-option" style="background:#F3F4F6;">${t}</div>`).join('')}
+                </div>`;
+            } else if (q.type === 'completar') {
+                bodyHtml = `<p class="text-muted" style="text-align:center; margin-top:10px;">Completa el espacio en blanco</p>`;
+            }
             panel.innerHTML = `
                 <div class="card">
                     <p class="text-muted" style="text-align:center;">Pregunta ${g.current_question_index + 1} de ${g.total_questions}</p>
                     <div class="projector-question">${q.statement}</div>
                     ${imageHtml}
                     <div class="projector-timer">${q.time_remaining}s</div>
-                    <div class="projector-options" style="margin-top:20px;">${optionsHtml}</div>
+                    ${bodyHtml}
                     <p style="text-align:center; margin-top:16px;" class="text-muted">Respondieron ${q.answered_count} de ${g.players_count}</p>
                 </div>
             `;
         } else if (g.status === 'question_results') {
             const r = data.results;
-            const optionsHtml = r.options.map(o =>
-                `<div class="projector-option" style="${o.is_correct ? 'border-color:var(--color-success); background:#E7F6EE;' : ''}">${o.text}<br><span class="text-muted" style="font-size:1rem;">${o.count} respuestas</span></div>`
-            ).join('');
+            let bodyHtml = '';
+            if (r.type === 'multiple' || r.type === 'truefalse') {
+                bodyHtml = `<div class="projector-options">${r.options.map(o =>
+                    `<div class="projector-option" style="${o.is_correct ? 'border-color:var(--color-success); background:#E7F6EE;' : ''}">${o.text}<br><span class="text-muted" style="font-size:1rem;">${o.count} respuestas</span></div>`
+                ).join('')}</div>`;
+            } else if (r.type === 'ordenar') {
+                bodyHtml = `<p style="text-align:center; font-size:1.3rem;">${r.correct_order.join(' → ')}</p>`;
+            } else if (r.type === 'relacionar') {
+                bodyHtml = `<div class="projector-options">${r.correct_pairs.map(p => `<div class="projector-option">${p.left} ↔ ${p.right}</div>`).join('')}</div>`;
+            } else if (r.type === 'completar') {
+                bodyHtml = `<p style="text-align:center; font-size:1.5rem; font-weight:700; color:var(--color-success);">${r.correct_answer}</p>`;
+            }
             panel.innerHTML = `
                 <div class="card">
                     <p class="text-muted" style="text-align:center;">Resultados — Pregunta ${g.current_question_index + 1} de ${g.total_questions}</p>
                     <div class="projector-question">${r.statement}</div>
-                    <div class="projector-options">${optionsHtml}</div>
+                    ${bodyHtml}
                     <h3 style="text-align:center; margin-top:24px;">Ranking</h3>
                     ${renderRanking(data.players)}
                 </div>

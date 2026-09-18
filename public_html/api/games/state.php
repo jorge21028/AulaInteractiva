@@ -81,11 +81,13 @@ if ($game['status'] === 'question' && isset($questions[$idx])) {
     $remaining = max((int) $q['time_seconds'] - $elapsed, 0);
 
     $myAnswer = null;
+    $alreadyAnswered = false;
     if ($playerId) {
         $aStmt = $pdo->prepare('SELECT option_id FROM game_answers WHERE player_id = :player_id AND question_id = :question_id');
         $aStmt->execute(['player_id' => $playerId, 'question_id' => $q['id']]);
         $existing = $aStmt->fetch();
-        $myAnswer = $existing ? (int) $existing['option_id'] : null;
+        $alreadyAnswered = (bool) $existing;
+        $myAnswer = $existing && $existing['option_id'] !== null ? (int) $existing['option_id'] : null;
     }
 
     $response['question'] = [
@@ -96,54 +98,89 @@ if ($game['status'] === 'question' && isset($questions[$idx])) {
         'time_remaining' => $remaining,
         'points'         => (int) $q['points'],
         'image_url'      => $q['image_path'] ? rtrim(APP_URL, '/') . '/' . $q['image_path'] : null,
-        'options'        => array_map(fn($o) => ['id' => (int) $o['id'], 'text' => $o['text']], $q['options']),
         'answered_count' => game_answered_count($pdo, (int) $game['id'], (int) $q['id']),
-        'already_answered' => $myAnswer !== null,
+        'already_answered' => $alreadyAnswered,
         'my_option_id'   => $myAnswer,
     ];
+
+    if ($q['type'] === 'multiple' || $q['type'] === 'truefalse') {
+        $response['question']['options'] = array_map(fn($o) => ['id' => (int) $o['id'], 'text' => $o['text']], $q['options']);
+    } elseif ($q['type'] === 'ordenar') {
+        $shuffled = game_stable_shuffle(
+            array_map(fn($o) => ['id' => (int) $o['id'], 'text' => $o['text']], $q['options']),
+            (int) $game['id'] * 1000003 + (int) $q['id']
+        );
+        $response['question']['items'] = $shuffled;
+    } elseif ($q['type'] === 'relacionar') {
+        $response['question']['left_items'] = array_map(fn($o) => ['id' => (int) $o['id'], 'text' => $o['text']], $q['options']);
+        $response['question']['right_items'] = game_shuffled_right_items($q['options'], (int) $game['id'], (int) $q['id']);
+    }
+    // 'completar' no necesita opciones: el estudiante escribe la respuesta.
 }
 
 if ($game['status'] === 'question_results' && isset($questions[$idx])) {
     $q = $questions[$idx];
-    $distribution = game_answer_distribution($pdo, (int) $game['id'], (int) $q['id']);
-    $correctOption = null;
 
-    $optionsOut = [];
-    foreach ($q['options'] as $o) {
-        if ((int) $o['is_correct'] === 1) {
-            $correctOption = (int) $o['id'];
-        }
-        $optionsOut[] = [
-            'id'         => (int) $o['id'],
-            'text'       => $o['text'],
-            'is_correct' => (bool) $o['is_correct'],
-            'count'      => $distribution[(int) $o['id']] ?? 0,
-        ];
-    }
-
-    $myResult = null;
+    $myAnswerRow = null;
     if ($playerId) {
-        $aStmt = $pdo->prepare('SELECT option_id, is_correct, points_awarded FROM game_answers WHERE player_id = :player_id AND question_id = :question_id');
+        $aStmt = $pdo->prepare('SELECT option_id, answer_data, is_correct, points_awarded FROM game_answers WHERE player_id = :player_id AND question_id = :question_id');
         $aStmt->execute(['player_id' => $playerId, 'question_id' => $q['id']]);
-        $mine = $aStmt->fetch();
-        if ($mine) {
-            $myResult = [
-                'option_id'      => $mine['option_id'] !== null ? (int) $mine['option_id'] : null,
-                'is_correct'     => (bool) $mine['is_correct'],
-                'points_awarded' => (int) $mine['points_awarded'],
-            ];
-        }
+        $myAnswerRow = $aStmt->fetch() ?: null;
     }
 
     $response['results'] = [
-        'question_id'     => (int) $q['id'],
-        'statement'        => $q['statement'],
-        'image_url'        => $q['image_path'] ? rtrim(APP_URL, '/') . '/' . $q['image_path'] : null,
-        'explanation'      => $q['explanation'],
-        'correct_option_id'=> $correctOption,
-        'options'          => $optionsOut,
-        'my_result'        => $myResult,
+        'question_id' => (int) $q['id'],
+        'statement'   => $q['statement'],
+        'image_url'   => $q['image_path'] ? rtrim(APP_URL, '/') . '/' . $q['image_path'] : null,
+        'explanation' => $q['explanation'],
+        'type'        => $q['type'],
     ];
+
+    if ($q['type'] === 'multiple' || $q['type'] === 'truefalse') {
+        $distribution = game_answer_distribution($pdo, (int) $game['id'], (int) $q['id']);
+        $correctOption = null;
+        $optionsOut = [];
+        foreach ($q['options'] as $o) {
+            if ((int) $o['is_correct'] === 1) {
+                $correctOption = (int) $o['id'];
+            }
+            $optionsOut[] = [
+                'id' => (int) $o['id'], 'text' => $o['text'], 'is_correct' => (bool) $o['is_correct'],
+                'count' => $distribution[(int) $o['id']] ?? 0,
+            ];
+        }
+        $response['results']['correct_option_id'] = $correctOption;
+        $response['results']['options'] = $optionsOut;
+        $response['results']['my_result'] = $myAnswerRow ? [
+            'option_id' => $myAnswerRow['option_id'] !== null ? (int) $myAnswerRow['option_id'] : null,
+            'is_correct' => (bool) $myAnswerRow['is_correct'],
+            'points_awarded' => (int) $myAnswerRow['points_awarded'],
+        ] : null;
+    } elseif ($q['type'] === 'ordenar') {
+        $correctOrder = $q['options'];
+        usort($correctOrder, fn($a, $b) => $a['order_index'] <=> $b['order_index']);
+        $response['results']['correct_order'] = array_map(fn($o) => $o['text'], $correctOrder);
+        $response['results']['my_result'] = $myAnswerRow ? [
+            'is_correct' => (bool) $myAnswerRow['is_correct'],
+            'points_awarded' => (int) $myAnswerRow['points_awarded'],
+        ] : null;
+    } elseif ($q['type'] === 'relacionar') {
+        $response['results']['correct_pairs'] = array_map(
+            fn($o) => ['left' => $o['text'], 'right' => $o['match_text']],
+            $q['options']
+        );
+        $response['results']['my_result'] = $myAnswerRow ? [
+            'is_correct' => (bool) $myAnswerRow['is_correct'],
+            'points_awarded' => (int) $myAnswerRow['points_awarded'],
+        ] : null;
+    } elseif ($q['type'] === 'completar') {
+        $response['results']['correct_answer'] = $q['options'][0]['text'] ?? '';
+        $response['results']['my_result'] = $myAnswerRow ? [
+            'submitted' => $myAnswerRow['answer_data'] !== null ? json_decode($myAnswerRow['answer_data'], true) : null,
+            'is_correct' => (bool) $myAnswerRow['is_correct'],
+            'points_awarded' => (int) $myAnswerRow['points_awarded'],
+        ] : null;
+    }
 }
 
 json_response($response);

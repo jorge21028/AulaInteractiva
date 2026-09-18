@@ -4,7 +4,7 @@ Plataforma educativa web independiente: actividades interactivas (tipo Kahoot/Ed
 
 Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks pesados. Compatible con hosting gratuito PHP/MySQL (InfinityFree).
 
-## Estado actual: FASE 8 completada
+## Estado actual: FASE 9 completada
 
 **Fase 1:** estructura, autenticación, roles, cursos y asignaturas.
 **Fase 2:** actividades interactivas manuales y partidas en vivo con polling.
@@ -45,13 +45,14 @@ Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks 
 
 1. Copia la carpeta `public_html` dentro de tu servidor local (por ejemplo `htdocs/aulainteractiva`).
 2. Crea una base de datos vacía en MySQL, por ejemplo `aulainteractiva`.
-3. Importa en orden: `schema_fase1.sql`, `schema_fase2.sql`, `schema_fase4.sql`, `schema_fase5.sql` y `schema_fase6.sql` con phpMyAdmin, o:
+3. Importa en orden: `schema_fase1.sql`, `schema_fase2.sql`, `schema_fase4.sql`, `schema_fase5.sql`, `schema_fase6.sql` y `schema_fase9.sql` con phpMyAdmin, o:
    ```
    mysql -u root -p aulainteractiva < database/schema_fase1.sql
    mysql -u root -p aulainteractiva < database/schema_fase2.sql
    mysql -u root -p aulainteractiva < database/schema_fase4.sql
    mysql -u root -p aulainteractiva < database/schema_fase5.sql
    mysql -u root -p aulainteractiva < database/schema_fase6.sql
+   mysql -u root -p aulainteractiva < database/schema_fase9.sql
    ```
 4. Copia `public_html/config/env.example.php` como `public_html/config/env.php` y completa tus credenciales locales.
 5. Para probar la Fase 3, obtén una API Key gratuita en [Google AI Studio](https://aistudio.google.com/apikey) y colócala en `GEMINI_API_KEY` dentro de `env.php`. Sin esto, todo lo demás funciona igual; solo el botón "Generar con Gemini" mostrará el mensaje de error genérico.
@@ -63,7 +64,7 @@ Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks 
 1. Crea tu cuenta y hosting en InfinityFree, y una base de datos MySQL desde el panel (vhost/cPanel).
 2. Sube el contenido de `public_html/` (no la carpeta en sí, sino su contenido) a la carpeta `htdocs` de tu hosting, vía Administrador de Archivos o FTP.
 3. En `config/env.php` (créalo en el servidor a partir de `env.example.php`) coloca las credenciales MySQL que InfinityFree te asigna (host, nombre de base de datos, usuario, contraseña), y tu `GEMINI_API_KEY` si quieres usar la generación con IA.
-4. Importa `schema_fase1.sql`, `schema_fase2.sql`, `schema_fase4.sql`, `schema_fase5.sql` y `schema_fase6.sql` (en ese orden) desde phpMyAdmin de InfinityFree.
+4. Importa `schema_fase1.sql`, `schema_fase2.sql`, `schema_fase4.sql`, `schema_fase5.sql`, `schema_fase6.sql` y `schema_fase9.sql` (en ese orden) desde phpMyAdmin de InfinityFree.
 5. Ajusta `APP_URL` y `APP_ENV=production` en `env.php`.
 6. Visita tu dominio y prueba registro/login.
 
@@ -91,6 +92,7 @@ database/
   schema_fase4.sql
   schema_fase5.sql
   schema_fase6.sql
+  schema_fase9.sql
 ```
 
 ## Seguridad implementada en Fase 1
@@ -136,8 +138,22 @@ database/
 - Todo el flujo (autocreación del proyecto con una diapositiva en blanco, guardado de varias diapositivas con saneo activo de imagen externa y de dimensiones fuera de rango, entrega, bloqueo posterior de edición, y vista de solo lectura del profesor con su propio botón de presentar) fue probado de extremo a extremo con base de datos real antes de la entrega.
 - **Limitación conocida**: no pude probar visualmente el editor ni el modo de presentación en un navegador real (igual que con el resto de los editores basados en Fabric.js) — te recomiendo abrirlo y probar la experiencia tú mismo. Tampoco hay todavía transiciones animadas entre diapositivas ni plantillas prediseñadas.
 
+## Fase 9 — Actividades estilo Educaplay (ordenar, relacionar, completar espacios)
+
+Amplía las actividades interactivas más allá del formato Kahoot (preguntas de opción), agregando tres tipos nuevos al mismo sistema de partidas en vivo, tanto en creación manual como generados con Gemini.
+
+- **Ordenar elementos**: el profesor define un conjunto de elementos en el orden correcto (ej. planetas del sistema solar, pasos de un proceso, eventos históricos). Al estudiante se le muestran mezclados y debe reordenarlos con botones ↑/↓.
+- **Relacionar parejas**: el profesor define parejas correctas (ej. país ↔ capital). Al estudiante se le muestra la columna izquierda fija y la derecha mezclada; empareja con clic-clic (sin necesitar arrastrar).
+- **Completar espacios**: el profesor escribe un enunciado con un espacio en blanco y la respuesta correcta; el estudiante escribe la respuesta en un campo de texto (comparación insensible a mayúsculas y espacios).
+- **Calificación con crédito parcial**: a diferencia de selección múltiple (todo o nada), ordenar y relacionar califican por porcentaje de acierto — por ejemplo, 2 de 4 elementos en su posición correcta = 50% de los puntos de esa pregunta (más la bonificación por rapidez, también escalada proporcionalmente). Completar es todo-o-nada, como corresponde a una respuesta exacta.
+- **Seguridad de las preguntas nuevas**: igual que con selección múltiple, el estudiante nunca recibe la respuesta correcta (el orden correcto, las parejas reales o el texto de la respuesta) hasta que termina la fase de resultados. El "desorden" que ve cada estudiante es estable durante todo el polling (no cambia cada 1-2 segundos) gracias a una mezcla con semilla determinística por partida+pregunta.
+- **Generación con Gemini**: el formulario de "Generar con Gemini" ahora permite pedir cualquiera de estos tipos por separado, o una actividad "Mixta" que combina los cinco tipos disponibles. Gemini nunca controla la partida ni publica directamente — el profesor revisa la vista previa (ahora adaptada a cada tipo) antes de guardar, igual que con selección múltiple.
+- **Bug real encontrado y corregido durante las pruebas**: mi primer guion de prueba en bash usó sintaxis de arreglos que no es compatible con el intérprete `sh` de este entorno — no fue un problema del código de la aplicación, sino de mi propio script de verificación; lo corregí y repetí la prueba completa antes de continuar.
+- Todo el flujo fue probado de extremo a extremo con base de datos real: creación manual de los 3 tipos nuevos, una partida jugada completa con puntajes parciales verificados matemáticamente (ordenar: 2/4 → 75 pts; relacionar: 2/3 → 100 pts; completar: coincidencia exacta insensible a mayúsculas → 150 pts), autocalificación de asignaciones con estos tipos, y guardado de una actividad "generada" con los 5 tipos mezclados simulando la respuesta de Gemini.
+- **Limitación conocida**: la interfaz de arrastrar-y-soltar no existe (se usa clic-clic para relacionar y botones ↑/↓ para ordenar, que funcionan en cualquier dispositivo incluyendo móvil, pero son menos vistosos que arrastrar). Tampoco hay todavía preguntas con audio/video como estímulo (solo imagen), ni "preguntas aleatorias" ni "modo por equipos" mencionados en la especificación original.
+
 ## Alcance completo
 
-Con esto se cierran las 7 fases planeadas originalmente, más la Fase 8 agregada a pedido. La plataforma cubre: autenticación y roles, estructura académica (cursos/asignaturas), actividades interactivas en vivo con partidas por código, generación de actividades con IA (siempre revisada por el profesor), asignaciones con calificación automática y manual, y cinco herramientas de creación académica para el estudiante (resúmenes, tablas comparativas, infografías, mapas mentales y presentaciones), con multimedia, exportación y estadísticas.
+Con esto se cierran las 7 fases planeadas originalmente, más las Fases 8 y 9 agregadas a pedido. La plataforma cubre: autenticación y roles, estructura académica (cursos/asignaturas), actividades interactivas en vivo con partidas por código (selección múltiple, verdadero/falso, ordenar, relacionar y completar espacios), generación de actividades con IA para los 5 tipos (siempre revisada por el profesor), asignaciones con calificación automática (incluyendo crédito parcial) y manual, y cinco herramientas de creación académica para el estudiante (resúmenes, tablas comparativas, infografías, mapas mentales y presentaciones), con multimedia, exportación y estadísticas.
 
-Posibles ampliaciones futuras: fichas de estudio, más tipos de pregunta (relacionar, ordenar, completar espacios — próxima entrega en curso), modo por equipos, integración con Google Classroom/Moodle, y una versión verdaderamente asíncrona de las actividades interactivas (sin depender de una sesión en vivo).
+Posibles ampliaciones futuras: fichas de estudio, preguntas con audio/video como estímulo, modo por equipos, arrastrar-y-soltar real para relacionar, integración con Google Classroom/Moodle, y una versión verdaderamente asíncrona de las actividades interactivas (sin depender de una sesión en vivo).

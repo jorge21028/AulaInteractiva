@@ -106,24 +106,42 @@ function render(data) {
         document.getElementById('btn-start').onclick = async () => { await hostAction('next'); poll(); };
     } else if (g.status === 'question') {
         const q = data.question;
+        let bodyHtml = '';
+        if (q.type === 'ordenar') {
+            bodyHtml = `<p class="text-muted">${q.items.map(i => i.text).join(' · ')}</p>`;
+        } else if (q.type === 'relacionar') {
+            bodyHtml = `<p class="text-muted">Izquierda: ${q.left_items.map(i => i.text).join(', ')}<br>Derecha (desordenada): ${q.right_items.join(', ')}</p>`;
+        } else if (q.type === 'completar') {
+            bodyHtml = `<p class="text-muted">El estudiante debe completar el espacio en blanco.</p>`;
+        }
         panel.innerHTML = `
             <h2 style="margin-top:0;">Pregunta ${g.current_question_index + 1} de ${g.total_questions}</h2>
             <p style="font-size:1.2rem;">${q.statement}</p>
             ${q.image_url ? `<img src="${q.image_url}" style="max-width:100%; max-height:200px; border-radius:8px; display:block; margin:8px auto;">` : ''}
+            ${bodyHtml}
             <p class="text-muted">Tiempo restante: ${q.time_remaining}s · Respondieron: ${q.answered_count} de ${g.players_count}</p>
             <button class="btn" id="btn-results">Ver resultados ahora</button>
         `;
         document.getElementById('btn-results').onclick = async () => { await hostAction('next'); poll(); };
     } else if (g.status === 'question_results') {
         const r = data.results;
-        const optionsHtml = r.options.map(o =>
-            `<div style="padding:6px 0;">${o.is_correct ? '✅' : '⬜'} ${o.text} — ${o.count} respuestas${o.is_correct ? ' <strong>(correcta)</strong>' : ''}</div>`
-        ).join('');
+        let bodyHtml = '';
+        if (r.type === 'multiple' || r.type === 'truefalse') {
+            bodyHtml = r.options.map(o =>
+                `<div style="padding:6px 0;">${o.is_correct ? '✅' : '⬜'} ${o.text} — ${o.count} respuestas${o.is_correct ? ' <strong>(correcta)</strong>' : ''}</div>`
+            ).join('');
+        } else if (r.type === 'ordenar') {
+            bodyHtml = `<p><strong>Orden correcto:</strong> ${r.correct_order.join(' → ')}</p>`;
+        } else if (r.type === 'relacionar') {
+            bodyHtml = `<p><strong>Parejas correctas:</strong> ${r.correct_pairs.map(p => `${p.left} ↔ ${p.right}`).join(' · ')}</p>`;
+        } else if (r.type === 'completar') {
+            bodyHtml = `<p><strong>Respuesta correcta:</strong> ${r.correct_answer}</p>`;
+        }
         const isLast = g.current_question_index >= g.total_questions - 1;
         panel.innerHTML = `
             <h2 style="margin-top:0;">Resultados — Pregunta ${g.current_question_index + 1} de ${g.total_questions}</h2>
             <p style="font-size:1.1rem;">${r.statement}</p>
-            ${optionsHtml}
+            ${bodyHtml}
             <h3>Ranking actual</h3>
             ${renderPlayers(data.players)}
             <button class="btn" id="btn-next">${isLast ? 'Finalizar partida' : 'Siguiente pregunta'}</button>

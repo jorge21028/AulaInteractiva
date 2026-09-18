@@ -27,7 +27,7 @@ class GeminiService
     private const TIMEOUT_SECONDS = 30;
     private const MAX_QUESTIONS = 25;
 
-    private const ALLOWED_TYPES = ['multiple', 'truefalse'];
+    private const ALLOWED_TYPES = ['multiple', 'truefalse', 'ordenar', 'relacionar', 'completar'];
     private const ALLOWED_DIFFICULTY = ['facil', 'media', 'dificil'];
 
     /**
@@ -124,9 +124,12 @@ class GeminiService
     private static function buildPrompt(array $p): string
     {
         $tipoTexto = match ($p['tipo']) {
-            'multiple'  => 'exclusivamente de selección múltiple (una sola respuesta correcta, entre 3 y 4 opciones)',
-            'truefalse' => 'exclusivamente de verdadero/falso',
-            default     => 'una combinación de selección múltiple (3-4 opciones) y verdadero/falso',
+            'multiple'   => 'exclusivamente de selección múltiple (una sola respuesta correcta, entre 3 y 4 opciones). Usa el campo "opciones".',
+            'truefalse'  => 'exclusivamente de verdadero/falso. Usa el campo "opciones" con exactamente 2 elementos ("Verdadero" y "Falso").',
+            'ordenar'    => 'exclusivamente de ordenar elementos (el estudiante debe poner una lista en el orden correcto: cronológico, de tamaño, de pasos de un proceso, etc). Usa el campo "orden": un array de 3 a 6 strings, EN EL ORDEN CORRECTO.',
+            'relacionar' => 'exclusivamente de relacionar parejas (el estudiante empareja elementos de una columna con su pareja correcta en otra). Usa el campo "pares": un array de 3 a 6 objetos {"izquierda": "...", "derecha": "..."}.',
+            'completar'  => 'exclusivamente de completar espacios (una frase con un espacio en blanco, una sola palabra o frase corta como respuesta). El enunciado DEBE incluir "____" donde va el espacio en blanco. Usa el campo "respuesta_correcta" con la palabra o frase exacta.',
+            default      => 'una combinación variada de estos tipos: selección múltiple (usa "opciones"), verdadero/falso (usa "opciones" con 2 elementos), ordenar elementos (usa "orden"), relacionar parejas (usa "pares"), y completar espacios (usa "respuesta_correcta", con "____" en el enunciado). Varía el tipo entre preguntas para que la actividad sea más entretenida.',
         };
 
         return <<<PROMPT
@@ -145,7 +148,9 @@ Instrucciones adicionales del profesor: {$p['instrucciones_adicionales']}
 
 Genera un título breve y atractivo para la actividad, una descripción de una
 línea, y exactamente {$p['cantidad']} preguntas apropiadas para estudiantes,
-claras, sin ambigüedad, con una única respuesta correcta por pregunta.
+claras, sin ambigüedad. Cada pregunta debe indicar su "tipo" exactamente como
+se describió arriba, y llenar SOLO el campo correspondiente a ese tipo
+("opciones", "orden", "pares" o "respuesta_correcta"; deja los demás vacíos).
 Las explicaciones deben ser breves (máximo 2 líneas) y educativas.
 No incluyas texto fuera del JSON solicitado.
 PROMPT;
@@ -154,6 +159,10 @@ PROMPT;
     /**
      * Esquema estructurado que Gemini debe respetar (Structured Output).
      * Evita que el modelo devuelva texto libre que haya que interpretar.
+     * Los cuatro campos de contenido (opciones/orden/pares/respuesta_correcta)
+     * son todos opcionales a nivel de esquema: cuál se usa depende del "tipo"
+     * de cada pregunta, y eso se valida en PHP (validateAndClean), no aquí,
+     * porque el structured output de Gemini no admite bien esa condicionalidad.
      */
     private static function responseSchema(): array
     {
@@ -167,7 +176,7 @@ PROMPT;
                     'items' => [
                         'type' => 'object',
                         'properties' => [
-                            'tipo' => ['type' => 'string', 'enum' => ['multiple', 'truefalse']],
+                            'tipo' => ['type' => 'string', 'enum' => self::ALLOWED_TYPES],
                             'enunciado' => ['type' => 'string'],
                             'tiempo' => ['type' => 'integer'],
                             'puntos' => ['type' => 'integer'],
@@ -182,9 +191,25 @@ PROMPT;
                                     'required' => ['texto', 'correcta'],
                                 ],
                             ],
+                            'orden' => [
+                                'type' => 'array',
+                                'items' => ['type' => 'string'],
+                            ],
+                            'pares' => [
+                                'type' => 'array',
+                                'items' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'izquierda' => ['type' => 'string'],
+                                        'derecha' => ['type' => 'string'],
+                                    ],
+                                    'required' => ['izquierda', 'derecha'],
+                                ],
+                            ],
+                            'respuesta_correcta' => ['type' => 'string'],
                             'explicacion' => ['type' => 'string'],
                         ],
-                        'required' => ['tipo', 'enunciado', 'tiempo', 'puntos', 'opciones'],
+                        'required' => ['tipo', 'enunciado', 'tiempo', 'puntos'],
                     ],
                 ],
             ],
@@ -278,47 +303,18 @@ PROMPT;
             $puntos = max(10, min(1000, (int) ($q['puntos'] ?? 100)));
             $explicacion = trim((string) ($q['explicacion'] ?? ''));
 
-            $opciones = $q['opciones'] ?? null;
-            if (!is_array($opciones) || count($opciones) < 2) {
-                return [false, "pregunta #{$i} sin suficientes opciones", []];
-            }
+            $cleanOptions = match ($tipo) {
+                'multiple', 'truefalse' => self::normalizeOpciones($q['opciones'] ?? null, $tipo),
+                'ordenar' => self::normalizeOrden($q['orden'] ?? null),
+                'relacionar' => self::normalizePares($q['pares'] ?? null),
+                'completar' => self::normalizeRespuestaCorrecta($q['respuesta_correcta'] ?? null),
+                default => null,
+            };
 
-            $cleanOptions = [];
-            $correctCount = 0;
-
-            foreach ($opciones as $o) {
-                if (!is_array($o)) {
-                    continue;
-                }
-                $texto = trim((string) ($o['texto'] ?? ''));
-                if ($texto === '') {
-                    continue;
-                }
-                $correcta = (bool) ($o['correcta'] ?? false);
-                if ($correcta) {
-                    $correctCount++;
-                }
-                $cleanOptions[] = ['texto' => $texto, 'correcta' => $correcta];
-            }
-
-            if (count($cleanOptions) < 2) {
-                return [false, "pregunta #{$i} con opciones vacías", []];
-            }
-
-            // Exactamente una opción correcta: si Gemini se equivocó (0 o varias),
-            // forzamos que la primera sea la correcta en vez de descartar la pregunta,
-            // pero queda claramente marcada para que el profesor la revise.
-            if ($correctCount !== 1) {
-                foreach ($cleanOptions as $idx => &$opt) {
-                    $opt['correcta'] = ($idx === 0);
-                }
-                unset($opt);
-            }
-
-            if ($tipo === 'truefalse') {
-                $cleanOptions = array_slice($cleanOptions, 0, 2);
-            } else {
-                $cleanOptions = array_slice($cleanOptions, 0, 6);
+            if ($cleanOptions === null) {
+                // El tipo específico no trajo datos utilizables: se omite esta
+                // pregunta en vez de descartar toda la actividad generada.
+                continue;
             }
 
             $cleanQuestions[] = [
@@ -340,5 +336,107 @@ PROMPT;
             'descripcion' => $descripcion,
             'preguntas'   => $cleanQuestions,
         ]];
+    }
+
+    /**
+     * Normaliza "opciones" (multiple/truefalse) al formato interno común
+     * {texto, correcta, match_text}. Devuelve null si no hay suficientes
+     * datos utilizables.
+     */
+    private static function normalizeOpciones($opciones, string $tipo): ?array
+    {
+        if (!is_array($opciones) || count($opciones) < 2) {
+            return null;
+        }
+
+        $clean = [];
+        $correctCount = 0;
+
+        foreach ($opciones as $o) {
+            if (!is_array($o)) {
+                continue;
+            }
+            $texto = trim((string) ($o['texto'] ?? ''));
+            if ($texto === '') {
+                continue;
+            }
+            $correcta = (bool) ($o['correcta'] ?? false);
+            if ($correcta) {
+                $correctCount++;
+            }
+            $clean[] = ['texto' => $texto, 'correcta' => $correcta, 'match_text' => null];
+        }
+
+        if (count($clean) < 2) {
+            return null;
+        }
+
+        // Exactamente una opción correcta: si Gemini se equivocó (0 o varias),
+        // forzamos que la primera sea la correcta en vez de descartar la pregunta,
+        // pero queda claramente marcada para que el profesor la revise.
+        if ($correctCount !== 1) {
+            foreach ($clean as $idx => &$opt) {
+                $opt['correcta'] = ($idx === 0);
+            }
+            unset($opt);
+        }
+
+        return $tipo === 'truefalse' ? array_slice($clean, 0, 2) : array_slice($clean, 0, 6);
+    }
+
+    /**
+     * Normaliza "orden" (lista en el orden correcto) al formato interno
+     * común, donde el orden del array ES el orden correcto.
+     */
+    private static function normalizeOrden($orden): ?array
+    {
+        if (!is_array($orden)) {
+            return null;
+        }
+
+        $clean = [];
+        foreach ($orden as $item) {
+            $texto = trim((string) $item);
+            if ($texto !== '') {
+                $clean[] = ['texto' => $texto, 'correcta' => true, 'match_text' => null];
+            }
+        }
+
+        return count($clean) >= 2 ? array_slice($clean, 0, 8) : null;
+    }
+
+    /**
+     * Normaliza "pares" (relacionar) al formato interno común, usando
+     * match_text para el lado derecho de cada pareja.
+     */
+    private static function normalizePares($pares): ?array
+    {
+        if (!is_array($pares)) {
+            return null;
+        }
+
+        $clean = [];
+        foreach ($pares as $p) {
+            if (!is_array($p)) {
+                continue;
+            }
+            $izq = trim((string) ($p['izquierda'] ?? ''));
+            $der = trim((string) ($p['derecha'] ?? ''));
+            if ($izq !== '' && $der !== '') {
+                $clean[] = ['texto' => $izq, 'correcta' => true, 'match_text' => $der];
+            }
+        }
+
+        return count($clean) >= 2 ? array_slice($clean, 0, 8) : null;
+    }
+
+    /**
+     * Normaliza "respuesta_correcta" (completar) al formato interno común:
+     * una sola "opción" que representa la respuesta correcta.
+     */
+    private static function normalizeRespuestaCorrecta($respuesta): ?array
+    {
+        $texto = trim((string) $respuesta);
+        return $texto !== '' ? [['texto' => $texto, 'correcta' => true, 'match_text' => null]] : null;
     }
 }

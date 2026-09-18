@@ -134,15 +134,166 @@ function game_advance(PDO $pdo, array $game, array $questions): array
  */
 function game_calculate_points(bool $isCorrect, int $questionPoints, int $speedBonusMax, int $timeSeconds, int $responseTimeMs): int
 {
-    if (!$isCorrect) {
+    return game_calculate_points_ratio($isCorrect ? 1.0 : 0.0, $questionPoints, $speedBonusMax, $timeSeconds, $responseTimeMs);
+}
+
+/**
+ * Igual que game_calculate_points(), pero para respuestas con crédito
+ * parcial (ordenar, relacionar): $ratio va de 0.0 (nada correcto) a
+ * 1.0 (todo correcto). Tanto los puntos base como la bonificación por
+ * rapidez se escalan proporcionalmente al acierto.
+ */
+function game_calculate_points_ratio(float $ratio, int $questionPoints, int $speedBonusMax, int $timeSeconds, int $responseTimeMs): int
+{
+    $ratio = max(0.0, min(1.0, $ratio));
+    if ($ratio <= 0.0) {
         return 0;
     }
 
     $totalMs = max($timeSeconds * 1000, 1);
     $remainingMs = max($totalMs - $responseTimeMs, 0);
-    $bonus = (int) round($speedBonusMax * ($remainingMs / $totalMs));
+    $bonus = (int) round($speedBonusMax * ($remainingMs / $totalMs) * $ratio);
 
-    return $questionPoints + $bonus;
+    return (int) round($questionPoints * $ratio) + $bonus;
+}
+
+/**
+ * Mezcla estable: da siempre el mismo resultado para la misma semilla,
+ * sin alterar el generador aleatorio global de PHP. Se usa para que el
+ * orden "desordenado" que ve el estudiante (en preguntas de ordenar o
+ * relacionar) sea el mismo en cada consulta de polling, en vez de
+ * cambiar cada 1-2 segundos.
+ */
+function game_stable_shuffle(array $items, int $seed): array
+{
+    $items = array_values($items);
+    mt_srand($seed);
+    for ($i = count($items) - 1; $i > 0; $i--) {
+        $j = mt_rand(0, $i);
+        [$items[$i], $items[$j]] = [$items[$j], $items[$i]];
+    }
+    mt_srand(); // volver a una semilla aleatoria, para no afectar el resto del sistema
+    return $items;
+}
+
+/**
+ * Reconstruye, de forma determinista, el orden "desordenado" de los
+ * elementos de la derecha en una pregunta de tipo "relacionar", tal
+ * como se le mostró al estudiante. Se necesita tanto para mostrárselo
+ * (state.php) como para calificar su respuesta (answer.php), ya que el
+ * estudiante responde con el índice dentro de esa lista mezclada.
+ */
+function game_shuffled_right_items(array $options, int $gameId, int $questionId): array
+{
+    $texts = array_map(fn($o) => (string) $o['match_text'], $options);
+    return game_stable_shuffle($texts, $gameId * 1000003 + $questionId);
+}
+
+/**
+ * Califica una respuesta de tipo "ordenar": compara, posición por
+ * posición, el orden que envió el estudiante contra el orden correcto
+ * (definido por order_index). Devuelve una proporción de 0.0 a 1.0.
+ *
+ * @param array $options Las opciones de la pregunta (con 'id' y 'order_index'), en cualquier orden.
+ * @param array $submittedOrder Array de option_id en el orden que eligió el estudiante.
+ */
+function game_score_ordenar(array $options, array $submittedOrder): float
+{
+    if (empty($options)) {
+        return 0.0;
+    }
+
+    $correctOrder = $options;
+    usort($correctOrder, fn($a, $b) => $a['order_index'] <=> $b['order_index']);
+    $correctIds = array_map(fn($o) => (int) $o['id'], $correctOrder);
+
+    $total = count($correctIds);
+    $correctCount = 0;
+    for ($i = 0; $i < $total; $i++) {
+        $submittedId = isset($submittedOrder[$i]) ? (int) $submittedOrder[$i] : null;
+        if ($submittedId === $correctIds[$i]) {
+            $correctCount++;
+        }
+    }
+
+    return $total > 0 ? $correctCount / $total : 0.0;
+}
+
+/**
+ * Califica una respuesta de tipo "relacionar". El estudiante envía,
+ * para cada opción (elemento izquierdo), el índice dentro de la lista
+ * mezclada de elementos derechos que eligió como pareja.
+ *
+ * @param array $options Las opciones de la pregunta (con 'id' y 'match_text').
+ * @param array $submittedPairs Array de ['option_id' => int, 'right_index' => int].
+ * @param array $shuffledRightTexts La lista mezclada de textos derechos (ver game_shuffled_right_items()).
+ */
+function game_score_relacionar(array $options, array $submittedPairs, array $shuffledRightTexts): float
+{
+    if (empty($options)) {
+        return 0.0;
+    }
+
+    $byId = [];
+    foreach ($options as $o) {
+        $byId[(int) $o['id']] = $o;
+    }
+
+    $submittedById = [];
+    foreach ($submittedPairs as $pair) {
+        if (!is_array($pair) || !isset($pair['option_id'])) {
+            continue;
+        }
+        $submittedById[(int) $pair['option_id']] = $pair['right_index'] ?? null;
+    }
+
+    $total = count($byId);
+    $correctCount = 0;
+
+    foreach ($byId as $optionId => $option) {
+        $rightIndex = $submittedById[$optionId] ?? null;
+        if ($rightIndex === null || !isset($shuffledRightTexts[$rightIndex])) {
+            continue;
+        }
+        $chosenText = mb_strtolower(trim((string) $shuffledRightTexts[$rightIndex]));
+        $correctText = mb_strtolower(trim((string) $option['match_text']));
+        if ($chosenText !== '' && $chosenText === $correctText) {
+            $correctCount++;
+        }
+    }
+
+    return $total > 0 ? $correctCount / $total : 0.0;
+}
+
+/**
+ * Califica una respuesta de tipo "completar" (una sola respuesta
+ * correcta en texto libre): comparación exacta, sin distinguir
+ * mayúsculas/minúsculas ni espacios sobrantes al inicio/final.
+ */
+function game_score_completar(string $correctAnswer, string $submittedAnswer): float
+{
+    $a = mb_strtolower(trim($correctAnswer));
+    $b = mb_strtolower(trim($submittedAnswer));
+    if ($a === '') {
+        return 0.0;
+    }
+    return $a === $b ? 1.0 : 0.0;
+}
+
+/**
+ * Nombre legible para cada tipo de pregunta soportado, usado en varias
+ * pantallas (lista de preguntas del profesor, resultados, etc.).
+ */
+function question_type_label(string $type): string
+{
+    return match ($type) {
+        'multiple' => 'Selección múltiple',
+        'truefalse' => 'Verdadero/Falso',
+        'ordenar' => 'Ordenar elementos',
+        'relacionar' => 'Relacionar parejas',
+        'completar' => 'Completar espacios',
+        default => ucfirst($type),
+    };
 }
 
 /**

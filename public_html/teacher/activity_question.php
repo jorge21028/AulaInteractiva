@@ -69,11 +69,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if ($action === 'delete_option' && $question['type'] === 'multiple') {
+    if ($action === 'delete_option') {
         $optionId = (int) ($_POST['option_id'] ?? 0);
-        $pdo->prepare('DELETE FROM question_options WHERE id = :id AND question_id = :qid')
-            ->execute(['id' => $optionId, 'qid' => $questionId]);
-        $notice = 'Opción eliminada.';
+        $countStmt = $pdo->prepare('SELECT COUNT(*) AS total FROM question_options WHERE question_id = :qid');
+        $countStmt->execute(['qid' => $questionId]);
+        $total = (int) ($countStmt->fetch()['total'] ?? 0);
+
+        $minRequired = in_array($question['type'], ['ordenar', 'relacionar'], true) ? 2 : 1;
+
+        if ($total <= $minRequired) {
+            $errors[] = 'Debe quedar al menos ' . $minRequired . ' elemento(s).';
+        } else {
+            $pdo->prepare('DELETE FROM question_options WHERE id = :id AND question_id = :qid')
+                ->execute(['id' => $optionId, 'qid' => $questionId]);
+            $notice = 'Elemento eliminado.';
+        }
     }
 
     if ($action === 'set_correct') {
@@ -82,6 +92,103 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->prepare('UPDATE question_options SET is_correct = 1 WHERE id = :id AND question_id = :qid')
             ->execute(['id' => $optionId, 'qid' => $questionId]);
         $notice = 'Respuesta correcta actualizada.';
+    }
+
+    // ---- Preguntas de "completar": editar la respuesta correcta ----
+    if ($action === 'update_completar_answer' && $question['type'] === 'completar') {
+        $text = clean_string($_POST['correct_answer'] ?? '');
+        if ($text === '') {
+            $errors[] = 'La respuesta correcta no puede estar vacía.';
+        } else {
+            $pdo->prepare('UPDATE question_options SET text = :text, is_correct = 1 WHERE question_id = :qid')
+                ->execute(['text' => $text, 'qid' => $questionId]);
+            $notice = 'Respuesta correcta actualizada.';
+        }
+    }
+
+    // ---- Preguntas de "ordenar": agregar / editar texto / mover ----
+    if ($action === 'add_order_item' && $question['type'] === 'ordenar') {
+        $text = clean_string($_POST['item_text'] ?? '');
+        if ($text === '') {
+            $errors[] = 'El texto del elemento no puede estar vacío.';
+        } else {
+            $countStmt = $pdo->prepare('SELECT COUNT(*) AS total FROM question_options WHERE question_id = :qid');
+            $countStmt->execute(['qid' => $questionId]);
+            $orderIndex = (int) ($countStmt->fetch()['total'] ?? 0);
+            $pdo->prepare(
+                'INSERT INTO question_options (question_id, text, is_correct, order_index) VALUES (:qid, :text, 1, :order_index)'
+            )->execute(['qid' => $questionId, 'text' => $text, 'order_index' => $orderIndex]);
+            $notice = 'Elemento agregado al final del orden correcto.';
+        }
+    }
+
+    if ($action === 'update_item_text' && in_array($question['type'], ['ordenar'], true)) {
+        $optionId = (int) ($_POST['option_id'] ?? 0);
+        $text = clean_string($_POST['item_text'] ?? '');
+        if ($text === '') {
+            $errors[] = 'El texto no puede estar vacío.';
+        } else {
+            $pdo->prepare('UPDATE question_options SET text = :text WHERE id = :id AND question_id = :qid')
+                ->execute(['text' => $text, 'id' => $optionId, 'qid' => $questionId]);
+            $notice = 'Elemento actualizado.';
+        }
+    }
+
+    if ($action === 'move_option' && $question['type'] === 'ordenar') {
+        $optionId = (int) ($_POST['option_id'] ?? 0);
+        $direction = $_POST['direction'] ?? '';
+
+        $listStmt = $pdo->prepare('SELECT id, order_index FROM question_options WHERE question_id = :qid ORDER BY order_index ASC, id ASC');
+        $listStmt->execute(['qid' => $questionId]);
+        $list = $listStmt->fetchAll();
+
+        $pos = null;
+        foreach ($list as $i => $row) {
+            if ((int) $row['id'] === $optionId) {
+                $pos = $i;
+                break;
+            }
+        }
+
+        if ($pos !== null) {
+            $swapWith = $direction === 'up' ? $pos - 1 : $pos + 1;
+            if (isset($list[$swapWith])) {
+                $a = $list[$pos];
+                $b = $list[$swapWith];
+                $pdo->prepare('UPDATE question_options SET order_index = :idx WHERE id = :id')->execute(['idx' => $b['order_index'], 'id' => $a['id']]);
+                $pdo->prepare('UPDATE question_options SET order_index = :idx WHERE id = :id')->execute(['idx' => $a['order_index'], 'id' => $b['id']]);
+            }
+        }
+    }
+
+    // ---- Preguntas de "relacionar": agregar / editar parejas ----
+    if ($action === 'add_pair' && $question['type'] === 'relacionar') {
+        $left = clean_string($_POST['pair_left'] ?? '');
+        $right = clean_string($_POST['pair_right'] ?? '');
+        if ($left === '' || $right === '') {
+            $errors[] = 'Ambos lados de la pareja son obligatorios.';
+        } else {
+            $countStmt = $pdo->prepare('SELECT COUNT(*) AS total FROM question_options WHERE question_id = :qid');
+            $countStmt->execute(['qid' => $questionId]);
+            $orderIndex = (int) ($countStmt->fetch()['total'] ?? 0);
+            $pdo->prepare(
+                'INSERT INTO question_options (question_id, text, match_text, is_correct, order_index) VALUES (:qid, :text, :match_text, 1, :order_index)'
+            )->execute(['qid' => $questionId, 'text' => $left, 'match_text' => $right, 'order_index' => $orderIndex]);
+            $notice = 'Pareja agregada.';
+        }
+    }
+
+    if ($action === 'update_pair' && $question['type'] === 'relacionar') {
+        $optionId = (int) ($_POST['option_id'] ?? 0);
+        $left = clean_string($_POST['pair_left'] ?? '');
+        $right = clean_string($_POST['pair_right'] ?? '');
+        if ($left === '' || $right === '') {
+            $errors[] = 'Ambos lados de la pareja son obligatorios.';
+        } else {
+            $pdo->prepare('UPDATE question_options SET text = :text, match_text = :match_text WHERE id = :id AND question_id = :qid')
+                ->execute(['text' => $left, 'match_text' => $right, 'id' => $optionId, 'qid' => $questionId]);
+            $notice = 'Pareja actualizada.';
+        }
     }
 }
 
@@ -207,42 +314,151 @@ require __DIR__ . '/../includes/header.php';
     </script>
 
     <section class="card">
-        <h2 style="margin-top:0;">Opciones de respuesta</h2>
-        <p class="text-muted" style="font-size:0.85rem;">Marca cuál es la respuesta correcta.</p>
+        <?php if ($question['type'] === 'multiple' || $question['type'] === 'truefalse'): ?>
+            <h2 style="margin-top:0;">Opciones de respuesta</h2>
+            <p class="text-muted" style="font-size:0.85rem;">Marca cuál es la respuesta correcta.</p>
 
-        <?php foreach ($options as $o): ?>
-            <div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--color-border);">
-                <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>" style="display:flex; align-items:center; gap:8px; flex:1;">
+            <?php foreach ($options as $o): ?>
+                <div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--color-border);">
+                    <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>" style="display:flex; align-items:center; gap:8px; flex:1;">
+                        <?php csrf_field(); ?>
+                        <input type="hidden" name="action" value="set_correct">
+                        <input type="hidden" name="option_id" value="<?= (int) $o['id'] ?>">
+                        <input type="radio" name="_noop" style="width:auto;" onclick="this.form.submit()" <?= $o['is_correct'] ? 'checked' : '' ?>>
+                        <span style="<?= $o['is_correct'] ? 'font-weight:600; color:var(--color-success);' : '' ?>"><?= e($o['text']) ?></span>
+                    </form>
+
+                    <?php if ($question['type'] === 'multiple'): ?>
+                        <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>">
+                            <?php csrf_field(); ?>
+                            <input type="hidden" name="action" value="delete_option">
+                            <input type="hidden" name="option_id" value="<?= (int) $o['id'] ?>">
+                            <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem; color:#C0392B; border-color:#C0392B;">Quitar</button>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            <?php endforeach; ?>
+
+            <?php if ($question['type'] === 'multiple'): ?>
+                <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>" style="margin-top:16px;">
                     <?php csrf_field(); ?>
-                    <input type="hidden" name="action" value="set_correct">
-                    <input type="hidden" name="option_id" value="<?= (int) $o['id'] ?>">
-                    <input type="radio" name="_noop" style="width:auto;" onclick="this.form.submit()" <?= $o['is_correct'] ? 'checked' : '' ?>>
-                    <span style="<?= $o['is_correct'] ? 'font-weight:600; color:var(--color-success);' : '' ?>"><?= e($o['text']) ?></span>
+                    <input type="hidden" name="action" value="add_option">
+                    <label for="option_text">Nueva opción</label>
+                    <input type="text" id="option_text" name="option_text" required placeholder="Texto de la opción">
+                    <button type="submit" class="btn">Agregar opción</button>
                 </form>
+            <?php else: ?>
+                <p class="text-muted" style="font-size:0.85rem; margin-top:12px;">
+                    Las preguntas de Verdadero/Falso tienen opciones fijas; solo puedes cambiar cuál es la correcta.
+                </p>
+            <?php endif; ?>
 
-                <?php if ($question['type'] === 'multiple'): ?>
-                    <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>">
+        <?php elseif ($question['type'] === 'ordenar'): ?>
+            <h2 style="margin-top:0;">Elementos en el orden correcto</h2>
+            <p class="text-muted" style="font-size:0.85rem;">
+                El orden en que aparecen aquí ES el orden correcto. Usa ↑/↓ para reordenar. Al estudiante se le
+                mostrarán desordenados.
+            </p>
+
+            <?php foreach ($options as $i => $o): ?>
+                <div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--color-border);">
+                    <strong style="width:24px;"><?= $i + 1 ?>.</strong>
+                    <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>" style="flex:1; display:flex; gap:6px;">
+                        <?php csrf_field(); ?>
+                        <input type="hidden" name="action" value="update_item_text">
+                        <input type="hidden" name="option_id" value="<?= (int) $o['id'] ?>">
+                        <input type="text" name="item_text" value="<?= e($o['text']) ?>" style="flex:1;">
+                        <button type="submit" class="btn btn-secondary" style="margin:0; padding:6px 10px; font-size:0.8rem;">Guardar</button>
+                    </form>
+                    <div style="display:flex; gap:4px;">
+                        <?php if ($i > 0): ?>
+                        <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>">
+                            <?php csrf_field(); ?>
+                            <input type="hidden" name="action" value="move_option">
+                            <input type="hidden" name="option_id" value="<?= (int) $o['id'] ?>">
+                            <input type="hidden" name="direction" value="up">
+                            <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 8px;">↑</button>
+                        </form>
+                        <?php endif; ?>
+                        <?php if ($i < count($options) - 1): ?>
+                        <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>">
+                            <?php csrf_field(); ?>
+                            <input type="hidden" name="action" value="move_option">
+                            <input type="hidden" name="option_id" value="<?= (int) $o['id'] ?>">
+                            <input type="hidden" name="direction" value="down">
+                            <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 8px;">↓</button>
+                        </form>
+                        <?php endif; ?>
+                        <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>">
+                            <?php csrf_field(); ?>
+                            <input type="hidden" name="action" value="delete_option">
+                            <input type="hidden" name="option_id" value="<?= (int) $o['id'] ?>">
+                            <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 8px; color:#C0392B; border-color:#C0392B;">✕</button>
+                        </form>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+
+            <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>" style="margin-top:16px;">
+                <?php csrf_field(); ?>
+                <input type="hidden" name="action" value="add_order_item">
+                <label for="item_text">Agregar elemento al final</label>
+                <input type="text" id="item_text" name="item_text" required placeholder="Ej: Segunda Guerra Mundial">
+                <button type="submit" class="btn">Agregar</button>
+            </form>
+
+        <?php elseif ($question['type'] === 'relacionar'): ?>
+            <h2 style="margin-top:0;">Parejas correctas</h2>
+            <p class="text-muted" style="font-size:0.85rem;">
+                Cada fila es una pareja correcta. Al estudiante se le mostrará la columna derecha desordenada.
+            </p>
+
+            <?php foreach ($options as $o): ?>
+                <div style="display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid var(--color-border);">
+                    <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>" style="display:flex; gap:8px; align-items:center; flex:1;">
+                        <?php csrf_field(); ?>
+                        <input type="hidden" name="action" value="update_pair">
+                        <input type="hidden" name="option_id" value="<?= (int) $o['id'] ?>">
+                        <input type="text" name="pair_left" value="<?= e($o['text']) ?>" placeholder="Izquierda" style="flex:1;">
+                        <span class="text-muted">&harr;</span>
+                        <input type="text" name="pair_right" value="<?= e($o['match_text'] ?? '') ?>" placeholder="Derecha" style="flex:1;">
+                        <button type="submit" class="btn btn-secondary" style="margin:0; padding:6px 10px; font-size:0.8rem;">Guardar</button>
+                    </form>
+                    <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>" onsubmit="return confirm('¿Eliminar esta pareja?')">
                         <?php csrf_field(); ?>
                         <input type="hidden" name="action" value="delete_option">
                         <input type="hidden" name="option_id" value="<?= (int) $o['id'] ?>">
-                        <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem; color:#C0392B; border-color:#C0392B;">Quitar</button>
+                        <button type="submit" class="btn btn-secondary" style="margin:0; padding:6px 8px; color:#C0392B; border-color:#C0392B;">✕</button>
                     </form>
-                <?php endif; ?>
-            </div>
-        <?php endforeach; ?>
+                </div>
+            <?php endforeach; ?>
 
-        <?php if ($question['type'] === 'multiple'): ?>
-            <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>" style="margin-top:16px;">
+            <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>" style="margin-top:16px; display:flex; gap:8px; align-items:flex-end;">
                 <?php csrf_field(); ?>
-                <input type="hidden" name="action" value="add_option">
-                <label for="option_text">Nueva opción</label>
-                <input type="text" id="option_text" name="option_text" required placeholder="Texto de la opción">
-                <button type="submit" class="btn">Agregar opción</button>
+                <input type="hidden" name="action" value="add_pair">
+                <div style="flex:1;">
+                    <label for="pair_left">Izquierda</label>
+                    <input type="text" id="pair_left" name="pair_left" required>
+                </div>
+                <div style="flex:1;">
+                    <label for="pair_right">Derecha</label>
+                    <input type="text" id="pair_right" name="pair_right" required>
+                </div>
+                <button type="submit" class="btn">Agregar pareja</button>
             </form>
-        <?php else: ?>
-            <p class="text-muted" style="font-size:0.85rem; margin-top:12px;">
-                Las preguntas de Verdadero/Falso tienen opciones fijas; solo puedes cambiar cuál es la correcta.
+
+        <?php elseif ($question['type'] === 'completar'): ?>
+            <h2 style="margin-top:0;">Respuesta correcta</h2>
+            <p class="text-muted" style="font-size:0.85rem;">
+                Recuerda que el enunciado debe incluir el espacio en blanco (ej: "____").
             </p>
+            <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>">
+                <?php csrf_field(); ?>
+                <input type="hidden" name="action" value="update_completar_answer">
+                <label for="correct_answer">Respuesta correcta</label>
+                <input type="text" id="correct_answer" name="correct_answer" required value="<?= e($options[0]['text'] ?? '') ?>">
+                <button type="submit" class="btn">Guardar</button>
+            </form>
         <?php endif; ?>
     </section>
 </div>

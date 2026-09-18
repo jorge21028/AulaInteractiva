@@ -69,11 +69,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $statement = clean_string($_POST['statement'] ?? '');
         $timeSeconds = max(5, (int) ($_POST['time_seconds'] ?? $activity['time_per_question']));
         $points = max(10, (int) ($_POST['points'] ?? $activity['points_base']));
+        $correctAnswer = clean_string($_POST['correct_answer'] ?? ''); // solo para 'completar'
 
-        if (!in_array($type, ['multiple', 'truefalse'], true)) {
+        $validTypes = ['multiple', 'truefalse', 'ordenar', 'relacionar', 'completar'];
+
+        if (!in_array($type, $validTypes, true)) {
             $errors[] = 'Tipo de pregunta inválido.';
         } elseif ($statement === '') {
             $errors[] = 'El enunciado no puede estar vacío.';
+        } elseif ($type === 'completar' && $correctAnswer === '') {
+            $errors[] = 'Indica la respuesta correcta para la pregunta de completar.';
         } else {
             $countStmt = $pdo->prepare('SELECT COUNT(*) AS total FROM activity_questions WHERE activity_id = :activity_id');
             $countStmt->execute(['activity_id' => $activityId]);
@@ -99,9 +104,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $optStmt->execute(['qid' => $questionId, 'text' => 'Falso', 'correct' => 0, 'order_index' => 1]);
             }
 
+            if ($type === 'completar') {
+                $pdo->prepare(
+                    'INSERT INTO question_options (question_id, text, is_correct, order_index) VALUES (:qid, :text, 1, 0)'
+                )->execute(['qid' => $questionId, 'text' => $correctAnswer]);
+            }
+
+            if ($type === 'ordenar') {
+                // Dos elementos de ejemplo para empezar; el profesor los edita/agrega desde la pantalla de la pregunta.
+                $optStmt = $pdo->prepare(
+                    'INSERT INTO question_options (question_id, text, is_correct, order_index) VALUES (:qid, :text, 1, :order_index)'
+                );
+                $optStmt->execute(['qid' => $questionId, 'text' => 'Primer elemento', 'order_index' => 0]);
+                $optStmt->execute(['qid' => $questionId, 'text' => 'Segundo elemento', 'order_index' => 1]);
+            }
+
+            if ($type === 'relacionar') {
+                $optStmt = $pdo->prepare(
+                    'INSERT INTO question_options (question_id, text, match_text, is_correct, order_index) VALUES (:qid, :text, :match_text, 1, :order_index)'
+                );
+                $optStmt->execute(['qid' => $questionId, 'text' => 'Elemento A', 'match_text' => 'Pareja A', 'order_index' => 0]);
+                $optStmt->execute(['qid' => $questionId, 'text' => 'Elemento B', 'match_text' => 'Pareja B', 'order_index' => 1]);
+            }
+
             $pdo->commit();
 
-            if ($type === 'multiple') {
+            if (in_array($type, ['multiple', 'ordenar', 'relacionar', 'completar'], true)) {
                 redirect('teacher/activity_question.php?id=' . $questionId);
             }
             $notice = 'Pregunta agregada.';
@@ -286,7 +314,7 @@ require __DIR__ . '/../includes/header.php';
                         <div>
                             <strong><?= $i + 1 ?>. <?= e(truncate_text($q['statement'], 80)) ?></strong>
                             <p class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">
-                                <?= $q['type'] === 'multiple' ? 'Selección múltiple' : 'Verdadero/Falso' ?> ·
+                                <?= e(question_type_label($q['type'])) ?> ·
                                 <?= (int) $q['time_seconds'] ?>s · <?= (int) $q['points'] ?> pts ·
                                 <?= count($q['options']) ?> opciones
                             </p>
@@ -332,18 +360,29 @@ require __DIR__ . '/../includes/header.php';
             <?php endforeach; ?>
         <?php endif; ?>
 
-        <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" style="margin-top:16px;">
+        <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" style="margin-top:16px;" id="add-question-form">
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="add_question">
 
             <label for="type">Tipo de pregunta</label>
-            <select id="type" name="type">
+            <select id="type" name="type" onchange="document.getElementById('completar-field').style.display = this.value === 'completar' ? 'block' : 'none';">
                 <option value="multiple">Selección múltiple</option>
                 <option value="truefalse">Verdadero/Falso</option>
+                <option value="ordenar">Ordenar elementos</option>
+                <option value="relacionar">Relacionar parejas</option>
+                <option value="completar">Completar espacios</option>
             </select>
 
             <label for="statement">Enunciado</label>
             <textarea id="statement" name="statement" rows="2" required placeholder="Escribe la pregunta..."></textarea>
+
+            <div id="completar-field" style="display:none;">
+                <label for="correct_answer">Respuesta correcta</label>
+                <input type="text" id="correct_answer" name="correct_answer" placeholder="Ej: Madrid">
+                <p class="text-muted" style="font-size:0.8rem; margin-top:-8px;">
+                    Escribe el enunciado con un espacio en blanco (ej: "La capital de España es ____") y aquí la palabra correcta.
+                </p>
+            </div>
 
             <label for="time_seconds">Tiempo (segundos)</label>
             <input type="text" id="time_seconds" name="time_seconds" value="<?= (int) $activity['time_per_question'] ?>">
@@ -353,7 +392,8 @@ require __DIR__ . '/../includes/header.php';
 
             <button type="submit" class="btn">Agregar pregunta</button>
             <p class="text-muted" style="font-size:0.8rem; margin-top:8px;">
-                Si eliges "Verdadero/Falso" se crea de inmediato. Si eliges "Selección múltiple" te llevará a agregar las opciones.
+                "Verdadero/Falso" y "Completar espacios" se crean de inmediato. Los demás tipos te llevarán a la pantalla
+                de la pregunta para agregar las opciones, el orden correcto o las parejas.
             </p>
         </form>
     </section>
