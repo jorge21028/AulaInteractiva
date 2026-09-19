@@ -1,10 +1,10 @@
-# AulaInteractiva
+# Dynamic SGA
 
 Plataforma educativa web independiente: actividades interactivas (tipo Kahoot/Educaplay) + creación de trabajos académicos (mapas mentales, infografías, presentaciones, resúmenes, tablas comparativas, etc.), con asignación, entrega y calificación.
 
 Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks pesados. Compatible con hosting gratuito PHP/MySQL (InfinityFree).
 
-## Estado actual: FASE 9 completada
+## Estado actual: FASE 10 completada (más rebranding a Dynamic SGA)
 
 **Fase 1:** estructura, autenticación, roles, cursos y asignaturas.
 **Fase 2:** actividades interactivas manuales y partidas en vivo con polling.
@@ -45,7 +45,7 @@ Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks 
 
 1. Copia la carpeta `public_html` dentro de tu servidor local (por ejemplo `htdocs/aulainteractiva`).
 2. Crea una base de datos vacía en MySQL, por ejemplo `aulainteractiva`.
-3. Importa en orden: `schema_fase1.sql`, `schema_fase2.sql`, `schema_fase4.sql`, `schema_fase5.sql`, `schema_fase6.sql` y `schema_fase9.sql` con phpMyAdmin, o:
+3. Importa en orden: `schema_fase1.sql`, `schema_fase2.sql`, `schema_fase4.sql`, `schema_fase5.sql`, `schema_fase6.sql`, `schema_fase9.sql` y `schema_fase10.sql` con phpMyAdmin, o:
    ```
    mysql -u root -p aulainteractiva < database/schema_fase1.sql
    mysql -u root -p aulainteractiva < database/schema_fase2.sql
@@ -53,6 +53,7 @@ Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks 
    mysql -u root -p aulainteractiva < database/schema_fase5.sql
    mysql -u root -p aulainteractiva < database/schema_fase6.sql
    mysql -u root -p aulainteractiva < database/schema_fase9.sql
+   mysql -u root -p aulainteractiva < database/schema_fase10.sql
    ```
 4. Copia `public_html/config/env.example.php` como `public_html/config/env.php` y completa tus credenciales locales.
 5. Para probar la Fase 3, obtén una API Key gratuita en [Google AI Studio](https://aistudio.google.com/apikey) y colócala en `GEMINI_API_KEY` dentro de `env.php`. Sin esto, todo lo demás funciona igual; solo el botón "Generar con Gemini" mostrará el mensaje de error genérico.
@@ -64,7 +65,7 @@ Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks 
 1. Crea tu cuenta y hosting en InfinityFree, y una base de datos MySQL desde el panel (vhost/cPanel).
 2. Sube el contenido de `public_html/` (no la carpeta en sí, sino su contenido) a la carpeta `htdocs` de tu hosting, vía Administrador de Archivos o FTP.
 3. En `config/env.php` (créalo en el servidor a partir de `env.example.php`) coloca las credenciales MySQL que InfinityFree te asigna (host, nombre de base de datos, usuario, contraseña), y tu `GEMINI_API_KEY` si quieres usar la generación con IA.
-4. Importa `schema_fase1.sql`, `schema_fase2.sql`, `schema_fase4.sql`, `schema_fase5.sql`, `schema_fase6.sql` y `schema_fase9.sql` (en ese orden) desde phpMyAdmin de InfinityFree.
+4. Importa `schema_fase1.sql`, `schema_fase2.sql`, `schema_fase4.sql`, `schema_fase5.sql`, `schema_fase6.sql`, `schema_fase9.sql` y `schema_fase10.sql` (en ese orden) desde phpMyAdmin de InfinityFree.
 5. Ajusta `APP_URL` y `APP_ENV=production` en `env.php`.
 6. Visita tu dominio y prueba registro/login.
 
@@ -72,15 +73,16 @@ Tecnologías: PHP 8.x + MySQL/MariaDB + JavaScript + HTML5/CSS3. Sin frameworks 
 
 ```
 public_html/
-  assets/          CSS, JS, imágenes, iconos
+  assets/          CSS, JS, imágenes, iconos (assets/icons/ = favicons + pack de iconos; assets/img/ = logo)
   config/          config.php, database.php, env.php (no versionado)
-  includes/        auth.php, security.php, functions.php, header.php, footer.php, game_helpers.php, assignment_helpers.php, project_helpers.php
+  includes/        auth.php, security.php, functions.php, header.php, footer.php, game_helpers.php, assignment_helpers.php, project_helpers.php, course_helpers.php
   services/        GeminiService.php (único punto de contacto con la IA)
   api/
     games/         state.php, host_action.php, join.php, answer.php (partidas en vivo)
     gemini/        generate.php (generación de actividades con IA)
   teacher/         panel y páginas del profesor (cursos, actividades, partidas, generación con IA, asignaciones, revisión de trabajos)
-  student/         panel y páginas del estudiante (asignaturas, actividades pendientes, calificaciones)
+  student/         panel y páginas del estudiante (asignaturas, actividades pendientes, calificaciones, unirse con código)
+  favicon.ico, site.webmanifest    en la raíz de public_html/ (identidad de marca)
   game/            unirse y jugar una partida (estudiante)
   projector/       pantalla de proyección para el salón
   editor/          resumen.php, tabla.php y canvas.php (infografías/mapas mentales) — creación académica del estudiante
@@ -93,6 +95,7 @@ database/
   schema_fase5.sql
   schema_fase6.sql
   schema_fase9.sql
+  schema_fase10.sql
 ```
 
 ## Seguridad implementada en Fase 1
@@ -154,6 +157,26 @@ Amplía las actividades interactivas más allá del formato Kahoot (preguntas de
 
 ## Alcance completo
 
-Con esto se cierran las 7 fases planeadas originalmente, más las Fases 8 y 9 agregadas a pedido. La plataforma cubre: autenticación y roles, estructura académica (cursos/asignaturas), actividades interactivas en vivo con partidas por código (selección múltiple, verdadero/falso, ordenar, relacionar y completar espacios), generación de actividades con IA para los 5 tipos (siempre revisada por el profesor), asignaciones con calificación automática (incluyendo crédito parcial) y manual, y cinco herramientas de creación académica para el estudiante (resúmenes, tablas comparativas, infografías, mapas mentales y presentaciones), con multimedia, exportación y estadísticas.
+Con esto se cierran las 7 fases planeadas originalmente, más las Fases 8, 9 y 10 agregadas a pedido. La plataforma cubre: autenticación y roles, estructura académica (cursos/asignaturas) con auto-matrícula por código, actividades interactivas en vivo con partidas por código (selección múltiple, verdadero/falso, ordenar, relacionar y completar espacios), generación de actividades con IA para los 5 tipos (siempre revisada por el profesor), asignaciones con calificación automática (incluyendo crédito parcial) y manual, y cinco herramientas de creación académica para el estudiante (resúmenes, tablas comparativas, infografías, mapas mentales y presentaciones), con multimedia, exportación y estadísticas — todo con la identidad visual de Dynamic SGA.
+
+## Identidad de marca — Dynamic SGA
+
+El proyecto se renombró de "AulaInteractiva" a **Dynamic SGA**, aplicando la línea gráfica provista por el cliente (no se inventó una paleta nueva):
+
+- **Colores**: gradiente de marca cian → azul → violeta (`#09C9FF → #0878F9 → #7B2CFF`), azul marino (`#071A3D`) para texto y encabezados. Definidos como variables CSS en `assets/css/style.css`, así que cambian en **todas** las páginas a la vez.
+- **Tipografía**: Montserrat (Google Fonts), pesos 400 a 800.
+- **Logo**: se generó una versión "solo isotipo" (`assets/img/logo-icon.svg`) a partir del SVG editable original, para usarla en el menú superior y el pie de página sin saturar espacios pequeños.
+- **Favicons**: pack completo instalado (`favicon.ico` en la raíz, más los tamaños 16 a 512px y `site.webmanifest` en `assets/icons/`), enlazados desde `includes/header.php` con las etiquetas `<link rel="icon">` estándar para que se vea bien en pestañas del navegador, marcadores y accesos directos en el celular.
+- **Pack de iconos**: el sprite de 40 iconos que enviaste se recortó automáticamente (con Python/Pillow) en imágenes individuales transparentes, guardadas en `assets/icons/`. Se usan ya en: el panel del profesor (tarjetas de Cursos/Asignaturas/Estudiantes), la portada (tarjetas "Para profesores"/"Para estudiantes"/"Sin instalaciones") y la página de unirse a una asignatura. Quedan los 40 disponibles en esa carpeta para usarlos en más pantallas cuando quieras — el resto del sitio se actualizó automáticamente por los nuevos estilos CSS aunque no lleve un ícono específico todavía.
+- Se revisó y reemplazó **cada mención de "AulaInteractiva"** en el código (título de las páginas, portada, textos de ayuda) — confirmado con una búsqueda exhaustiva antes de la entrega.
+
+## Fase 10 — Auto-matrícula por código de curso
+
+- Cada curso ahora tiene un **código de 6 caracteres** (sin 0/O/1/I/L, para que no se confunda al leerlo en voz alta), que se genera automáticamente la primera vez que el profesor visita la página del curso.
+- El profesor lo ve destacado en `teacher/course.php`, con un botón para **regenerarlo** (invalida el anterior) si necesita controlarlo — por ejemplo, si ya no quiere que se sigan uniendo con el código viejo.
+- El estudiante lo ingresa desde su panel → **"Unirme a una asignatura"** (`student/join_course.php`) y queda inscrito al instante, sin que el profesor tenga que escribir su correo manualmente.
+- **Mejora adicional que aproveché de agregar**: si el estudiante se une a un curso que ya tenía asignaciones creadas, el sistema le crea automáticamente las entregas pendientes de esas asignaciones (antes, un estudiante inscrito tarde se las perdía por completo, tanto por este método nuevo como por la inscripción manual — ahora ambos caminos comparten la misma función y quedan arreglados a la vez).
+- Sigue existiendo la inscripción manual por correo (útil si el profesor prefiere controlar la lista él mismo), ahora marcada como opcional.
+- Todo esto (generación automática del código, auto-matrícula, relleno automático de asignaciones previas, bloqueo de inscripción duplicada, código inválido rechazado, y regeneración invalidando el código anterior) fue probado de extremo a extremo con base de datos real antes de la entrega.
 
 Posibles ampliaciones futuras: fichas de estudio, preguntas con audio/video como estímulo, modo por equipos, arrastrar-y-soltar real para relacionar, integración con Google Classroom/Moodle, y una versión verdaderamente asíncrona de las actividades interactivas (sin depender de una sesión en vivo).

@@ -9,26 +9,36 @@ if (is_logged_in()) {
 
 $pageTitle = 'Bienvenido';
 require __DIR__ . '/includes/header.php';
+$baseUrl = rtrim(APP_URL, '/');
 ?>
-<section class="card" style="text-align:center; padding:48px 24px;">
-    <h1 style="margin-top:0;">AulaInteractiva</h1>
-    <p class="text-muted">Actividades interactivas y trabajos académicos, todo en un mismo lugar.</p>
-    <div style="margin-top:24px; display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
-        <a class="btn" href="login.php">Iniciar sesión</a>
-        <a class="btn btn-secondary" href="register.php">Crear cuenta</a>
+<section class="card" style="text-align:center; padding:56px 24px; background:var(--gradient-brand); border:none;">
+    <img src="<?= e($baseUrl) ?>/assets/img/logo-icon.svg" alt="" style="width:72px; height:72px; margin-bottom:16px;">
+    <h1 style="margin:0; color:#fff; font-size:2.4rem;">Dynamic SGA</h1>
+    <p style="color:rgba(255,255,255,0.92); letter-spacing:0.08em; font-weight:600; margin:6px 0 0; font-size:0.9rem;">
+        APRENDE. CREA. PARTICIPA.
+    </p>
+    <p style="color:rgba(255,255,255,0.9); max-width:480px; margin:18px auto 0;">
+        Actividades interactivas y trabajos académicos, todo en un mismo lugar.
+    </p>
+    <div style="margin-top:28px; display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
+        <a class="btn" style="background:#fff; color:var(--color-primary); margin-top:0;" href="login.php">Iniciar sesión</a>
+        <a class="btn btn-secondary" style="border-color:#fff; color:#fff; margin-top:0;" href="register.php">Crear cuenta</a>
     </div>
 </section>
 
 <section class="grid grid-3" style="margin-top:24px;">
     <div class="card">
+        <div class="icon-badge"><img src="<?= e($baseUrl) ?>/assets/icons/Profesores.png" alt=""></div>
         <h3>Para profesores</h3>
         <p class="text-muted">Crea actividades interactivas manualmente o con ayuda de IA, asígnalas y revisa resultados en tiempo real.</p>
     </div>
     <div class="card">
+        <div class="icon-badge"><img src="<?= e($baseUrl) ?>/assets/icons/Estudiantes.png" alt=""></div>
         <h3>Para estudiantes</h3>
         <p class="text-muted">Participa en juegos con un código y elabora tus propios trabajos: mapas mentales, resúmenes, infografías y más.</p>
     </div>
     <div class="card">
+        <div class="icon-badge"><img src="<?= e($baseUrl) ?>/assets/icons/EnVivo.png" alt=""></div>
         <h3>Sin instalaciones</h3>
         <p class="text-muted">Funciona directamente desde el navegador, en computadora, tableta o teléfono.</p>
     </div>

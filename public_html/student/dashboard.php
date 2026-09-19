@@ -55,7 +55,10 @@ require __DIR__ . '/../includes/header.php';
 ?>
 <h1>Mi panel</h1>
 
-<p><a class="btn" href="<?= e(rtrim(APP_URL, '/')) ?>/game/join.php">🎮 Unirse a un juego con un código</a></p>
+<p>
+    <a class="btn" href="<?= e(rtrim(APP_URL, '/')) ?>/game/join.php">Unirse a un juego con un código</a>
+    <a class="btn btn-secondary" href="<?= e(rtrim(APP_URL, '/')) ?>/student/join_course.php">Unirme a una asignatura</a>
+</p>
 
 <section class="card">
     <h2 style="margin-top:0;">Actividades pendientes</h2>

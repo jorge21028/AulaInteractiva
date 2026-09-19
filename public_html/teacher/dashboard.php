@@ -66,14 +66,17 @@ require __DIR__ . '/../includes/header.php';
 
 <section class="grid grid-3">
     <div class="card">
+        <div class="icon-badge"><img src="<?= e(rtrim(APP_URL, '/')) ?>/assets/icons/Proyectos.png" alt=""></div>
         <div class="stat-number"><?= (int) $totalCourses ?></div>
         <div class="stat-label">Cursos</div>
     </div>
     <div class="card">
+        <div class="icon-badge"><img src="<?= e(rtrim(APP_URL, '/')) ?>/assets/icons/Asignaturas.png" alt=""></div>
         <div class="stat-number"><?= (int) $totalSubjects ?></div>
         <div class="stat-label">Asignaturas</div>
     </div>
     <div class="card">
+        <div class="icon-badge"><img src="<?= e(rtrim(APP_URL, '/')) ?>/assets/icons/Estudiantes.png" alt=""></div>
         <div class="stat-number"><?= (int) $totalStudents ?></div>
         <div class="stat-label">Estudiantes</div>
     </div>

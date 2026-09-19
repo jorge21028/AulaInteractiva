@@ -37,7 +37,7 @@ foreach ($requiredConstants as $const) {
 }
 
 // ---- Configuración general de la aplicación ----
-define('APP_NAME', 'AulaInteractiva');
+define('APP_NAME', 'Dynamic SGA');
 
 // APP_ENV y APP_URL: se definen en env.php. Si por alguna razón no
 // se definieron ahí, usamos un valor por defecto seguro.

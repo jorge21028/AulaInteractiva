@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="700" viewBox="0 0 1600 700">
+  <defs>
+    <linearGradient id="bluePurple" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#09C9FF"/>
+      <stop offset="48%" stop-color="#0878F9"/>
+      <stop offset="100%" stop-color="#7B2CFF"/>
+    </linearGradient>
+    <linearGradient id="cyanBlue" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#08CFFF"/>
+      <stop offset="100%" stop-color="#0878F9"/>
+    </linearGradient>
+    <linearGradient id="purpleBlue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0878F9"/>
+      <stop offset="100%" stop-color="#8B2CFF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Transparent background -->
+
+  <!-- Isotipo -->
+  <g transform="translate(55 90)">
+    <!-- Main rounded D form -->
+    <path d="M185 20
+             C300 20 380 88 380 180
+             C380 276 302 350 188 350
+             L118 350
+             C98 350 84 336 84 316
+             L84 72
+             C84 42 105 20 135 20 Z
+             M160 83 L160 287 L188 287
+             C257 287 310 245 310 180
+             C310 122 258 83 188 83 Z"
+          fill="url(#bluePurple)" fill-rule="evenodd"/>
+
+    <!-- Lower purple sweep -->
+    <path d="M92 309
+             C170 360 290 365 382 295
+             C353 353 292 392 196 392
+             C147 392 109 367 92 309Z"
+          fill="url(#purpleBlue)"/>
+
+    <!-- Orbital ring -->
+    <path d="M20 285
+             C82 201 177 151 286 145
+             C340 142 385 151 421 168
+             C388 163 353 163 318 169
+             C199 188 98 244 45 327
+             C34 344 15 338 20 285Z"
+          fill="url(#cyanBlue)"/>
+
+    <!-- Planet dot -->
+    <circle cx="374" cy="35" r="25" fill="url(#cyanBlue)"/>
+  </g>
+
+  <!-- Wordmark -->
+  <g font-family="Montserrat, Arial, sans-serif">
+    <text x="520" y="270" font-size="132" font-weight="700" letter-spacing="-5"
+          fill="#071A3D">Dynamic</text>
+    <text x="1045" y="380" font-size="105" font-weight="800" letter-spacing="-2"
+          fill="url(#cyanBlue)">SGA</text>
+    <text x="525" y="465" font-size="40" font-weight="400" letter-spacing="10"
+          fill="#071A3D">APRENDE. CREA. PARTICIPA.</text>
+  </g>
+</svg>
