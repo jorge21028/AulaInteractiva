@@ -71,3 +71,18 @@ function audit_log(PDO $pdo, ?int $userId, string $action, string $details = '')
         error_log('audit_log error: ' . $e->getMessage());
     }
 }
+
+/**
+ * Genera una contraseña temporal legible (sin 0/O, 1/l/I para evitar confusiones al dictarla).
+ * Se usa para restablecimientos de contraseña hechos por el profesor.
+ */
+function generate_temp_password(int $length = 8): string
+{
+    $chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    $max = strlen($chars) - 1;
+    $password = '';
+    for ($i = 0; $i < $length; $i++) {
+        $password .= $chars[random_int(0, $max)];
+    }
+    return $password;
+}

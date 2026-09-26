@@ -37,6 +37,9 @@ $baseUrl = rtrim(APP_URL, '/');
             <?php if (is_logged_in()): ?>
                 <span class="nav-user">Hola, <?= e(current_user_name()) ?></span>
                 <a href="<?= e($baseUrl) ?>/<?= e(dashboard_url_for_role(current_role())) ?>">Panel</a>
+                <?php if (current_role() === 'teacher'): ?>
+                    <a href="<?= e($baseUrl) ?>/teacher/profile.php">Mi perfil</a>
+                <?php endif; ?>
                 <a href="<?= e($baseUrl) ?>/logout.php">Salir</a>
             <?php else: ?>
                 <a href="<?= e($baseUrl) ?>/login.php">Iniciar sesión</a>

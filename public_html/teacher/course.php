@@ -35,6 +35,7 @@ if (empty($course['enrollment_code'])) {
 
 $errors = [];
 $notice = null;
+$resetInfo = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify($_POST['csrf_token'] ?? null);
@@ -78,6 +79,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         audit_log($pdo, $teacherId, 'regenerate_course_code', "Curso #{$courseId}");
         $notice = 'Código regenerado. El código anterior ya no funcionará.';
     }
+
+    if ($action === 'reset_student_password') {
+        $studentId = (int) ($_POST['student_id'] ?? 0);
+
+        // Solo se puede restablecer la contraseña de un estudiante que esté
+        // inscrito en ESTE curso del profesor (evita que un profesor resetee
+        // la contraseña de cualquier estudiante del sistema).
+        $checkStmt = $pdo->prepare(
+            "SELECT u.id, u.name FROM course_students cs
+             INNER JOIN users u ON u.id = cs.student_id
+             WHERE cs.course_id = :course_id AND cs.student_id = :student_id AND u.role = 'student'
+             LIMIT 1"
+        );
+        $checkStmt->execute(['course_id' => $courseId, 'student_id' => $studentId]);
+        $target = $checkStmt->fetch();
+
+        if (!$target) {
+            $errors[] = 'Ese estudiante no está inscrito en este curso.';
+        } else {
+            $newPassword = generate_temp_password();
+            $pdo->prepare('UPDATE users SET password_hash = :hash, updated_at = :updated_at WHERE id = :id')
+                ->execute([
+                    'hash'       => password_hash($newPassword, PASSWORD_DEFAULT),
+                    'updated_at' => now_datetime(),
+                    'id'         => $studentId,
+                ]);
+            audit_log($pdo, $teacherId, 'reset_student_password', "Estudiante #{$studentId} ({$target['name']})");
+            $resetInfo = ['name' => $target['name'], 'password' => $newPassword];
+        }
+    }
 }
 
 // Asignaturas del curso
@@ -105,6 +136,15 @@ require __DIR__ . '/../includes/header.php';
 <?php endforeach; ?>
 <?php if ($notice): ?>
     <div class="alert alert-success"><?= e($notice) ?></div>
+<?php endif; ?>
+<?php if ($resetInfo): ?>
+    <div class="alert alert-success" style="border:2px solid var(--color-primary); font-size:1rem;">
+        Contraseña restablecida para <strong><?= e($resetInfo['name']) ?></strong>. Nueva contraseña temporal:
+        <div style="font-size:1.6rem; font-weight:800; letter-spacing:3px; margin:8px 0; text-align:center;">
+            <?= e($resetInfo['password']) ?>
+        </div>
+        Comunícasela al estudiante ahora — no se volverá a mostrar. Recomiéndale cambiarla luego de iniciar sesión.
+    </div>
 <?php endif; ?>
 
 <section class="card" style="text-align:center; background:var(--gradient-brand-soft); border-color:var(--color-primary-light);">
@@ -150,9 +190,20 @@ require __DIR__ . '/../includes/header.php';
         <?php if (empty($students)): ?>
             <p class="empty-state">Sin estudiantes todavía.</p>
         <?php else: ?>
-            <ul>
+            <ul style="list-style:none; padding:0; margin:0;">
                 <?php foreach ($students as $st): ?>
-                    <li><?= e($st['name']) ?> <span class="text-muted">(<?= e($st['email']) ?>)</span></li>
+                    <li style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--color-border);">
+                        <span><?= e($st['name']) ?> <span class="text-muted">(<?= e($st['email']) ?>)</span></span>
+                        <form method="post" action="course.php?id=<?= (int) $courseId ?>"
+                              onsubmit="return confirm('¿Restablecer la contraseña de <?= e(addslashes($st['name'])) ?>? Se generará una nueva contraseña temporal.')">
+                            <?php csrf_field(); ?>
+                            <input type="hidden" name="action" value="reset_student_password">
+                            <input type="hidden" name="student_id" value="<?= (int) $st['id'] ?>">
+                            <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem; white-space:nowrap;">
+                                Restablecer contraseña
+                            </button>
+                        </form>
+                    </li>
                 <?php endforeach; ?>
             </ul>
         <?php endif; ?>
