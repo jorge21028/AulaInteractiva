@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/game_helpers.php';
+require_once __DIR__ . '/../includes/aiken_helpers.php';
 
 require_role('teacher');
 
@@ -118,6 +119,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 redirect('teacher/activity_question.php?id=' . $questionId);
             }
             $notice = 'Pregunta agregada.';
+        }
+    }
+
+    if ($action === 'import_aiken') {
+        if (!isset($_FILES['aiken_file']) || $_FILES['aiken_file']['error'] !== UPLOAD_ERR_OK) {
+            $errors[] = 'No se pudo subir el archivo. Verifica que hayas seleccionado un archivo .txt.';
+        } elseif ($_FILES['aiken_file']['size'] > 1 * 1024 * 1024) {
+            $errors[] = 'El archivo es demasiado grande (máximo 1 MB).';
+        } else {
+            $content = file_get_contents($_FILES['aiken_file']['tmp_name']);
+            if ($content === false || trim($content) === '') {
+                $errors[] = 'El archivo está vacío o no se pudo leer.';
+            } else {
+                $parsed = aiken_parse_questions($content);
+
+                if (!empty($parsed['questions'])) {
+                    $imported = aiken_import_into_activity(
+                        $pdo, $activityId, $parsed['questions'],
+                        (int) $activity['time_per_question'], (int) $activity['points_base']
+                    );
+                    $notice = $imported . ' pregunta(s) importada(s) correctamente desde el archivo Aiken.';
+                } else {
+                    $errors[] = 'No se encontró ninguna pregunta válida en el archivo.';
+                }
+
+                foreach ($parsed['errors'] as $err) {
+                    $errors[] = $err;
+                }
+            }
         }
     }
 
@@ -297,6 +327,31 @@ require __DIR__ . '/../includes/header.php';
 
     <section class="card">
         <h2 style="margin-top:0;">Preguntas (<?= count($questions) ?>)</h2>
+
+        <div class="card" style="background:#F8FAFC; margin-bottom:16px;">
+            <h3 style="margin-top:0;">Importar preguntas desde archivo Aiken</h3>
+            <p class="text-muted" style="font-size:0.85rem;">
+                Sube un archivo <code>.txt</code> con formato Aiken y se agregarán al final como preguntas de
+                selección múltiple (con tiempo <?= (int) $activity['time_per_question'] ?>s y
+                <?= (int) $activity['points_base'] ?> pts por defecto, editables después). Ejemplo de una pregunta:
+            </p>
+            <pre style="background:#fff; border:1px solid var(--color-border); border-radius:8px; padding:10px 14px; font-size:0.8rem; overflow-x:auto;">¿Cuál es la capital de Francia?
+A) Madrid
+B) París
+C) Roma
+D) Berlín
+ANSWER: B</pre>
+            <p class="text-muted" style="font-size:0.8rem;">
+                Puedes poner varias preguntas en el mismo archivo, separadas por una línea en blanco.
+            </p>
+            <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" enctype="multipart/form-data" style="margin-top:12px;">
+                <?php csrf_field(); ?>
+                <input type="hidden" name="action" value="import_aiken">
+                <label for="aiken_file">Archivo (.txt)</label>
+                <input type="file" id="aiken_file" name="aiken_file" accept=".txt,text/plain" required>
+                <button type="submit" class="btn">Importar preguntas</button>
+            </form>
+        </div>
 
         <?php if (empty($questions)): ?>
             <p class="empty-state">Sin preguntas todavía.</p>
