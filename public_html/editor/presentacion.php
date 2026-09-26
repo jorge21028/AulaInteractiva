@@ -64,6 +64,7 @@ require __DIR__ . '/../includes/header.php';
         <button type="button" id="btn-add-text">+ Texto</button>
         <button type="button" id="btn-add-rect">+ Rectángulo</button>
         <button type="button" id="btn-add-circle">+ Círculo</button>
+        <button type="button" id="btn-add-diamond">+ Rombo</button>
         <button type="button" id="btn-add-line">+ Línea</button>
         <button type="button" id="btn-upload-image">+ Imagen</button>
         <input type="file" id="file-image" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none;">
@@ -235,6 +236,12 @@ if (!IS_SUBMITTED) {
     document.getElementById('btn-add-circle').addEventListener('click', () => {
         const c = new fabric.Circle({ left: 100, top: 100, radius: 60, fill: '#E8F0FE', stroke: '#1E4FA3', strokeWidth: 2 });
         canvas.add(c).setActiveObject(c);
+    });
+    document.getElementById('btn-add-diamond').addEventListener('click', () => {
+        const d = new fabric.Polygon([
+            { x: 90, y: 0 }, { x: 180, y: 55 }, { x: 90, y: 110 }, { x: 0, y: 55 },
+        ], { left: 100, top: 100, fill: '#E8F0FE', stroke: '#1E4FA3', strokeWidth: 2 });
+        canvas.add(d).setActiveObject(d);
     });
     document.getElementById('btn-add-line').addEventListener('click', () => {
         const l = new fabric.Line([50, 50, 250, 50], { stroke: '#1F2937', strokeWidth: 3 });
