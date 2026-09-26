@@ -93,7 +93,7 @@ function renderTable() {
     const table = document.getElementById('comparative-table');
     let html = '<thead><tr>';
     tableData.columns.forEach((col, ci) => {
-        html += `<th><input type="text" value="${escapeAttr(col)}" data-col="${ci}" class="col-header"></th>`;
+        html += `<th><div style="display:flex; align-items:center; gap:4px;"><input type="text" value="${escapeAttr(col)}" data-col="${ci}" class="col-header"><button type="button" class="btn-remove-col" data-col="${ci}" title="Eliminar columna" style="border:none; background:none; cursor:pointer; color:var(--color-danger); flex-shrink:0;">✕</button></div></th>`;
     });
     html += '<th class="col-actions">-</th></tr></thead><tbody>';
 
@@ -117,6 +117,19 @@ function renderTable() {
         el.addEventListener('click', e => {
             if (tableData.rows.length <= 1) return;
             tableData.rows.splice(parseInt(e.target.dataset.row, 10), 1);
+            renderTable();
+        });
+    });
+    document.querySelectorAll('.btn-remove-col').forEach(el => {
+        el.addEventListener('click', e => {
+            if (tableData.columns.length <= 1) {
+                alert('Debe quedar al menos una columna.');
+                return;
+            }
+            const colIndex = parseInt(e.target.dataset.col, 10);
+            if (!confirm('¿Eliminar esta columna? Se perderán los datos de esa columna en todas las filas.')) return;
+            tableData.columns.splice(colIndex, 1);
+            tableData.rows.forEach(row => row.splice(colIndex, 1));
             renderTable();
         });
     });
