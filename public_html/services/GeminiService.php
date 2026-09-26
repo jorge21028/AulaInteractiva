@@ -24,7 +24,9 @@ if (!defined('AULA_APP')) {
 class GeminiService
 {
     private const ENDPOINT_TEMPLATE = 'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s';
-    private const TIMEOUT_SECONDS = 30;
+    private const TIMEOUT_SECONDS = 45;
+    private const CONNECT_TIMEOUT_SECONDS = 15;
+    private const MAX_RETRIES = 2; // intentos totales, no solo reintentos
     private const MAX_QUESTIONS = 25;
 
     private const ALLOWED_TYPES = ['multiple', 'truefalse', 'ordenar', 'relacionar', 'completar'];
@@ -45,6 +47,13 @@ class GeminiService
 
         if (!function_exists('curl_init')) {
             return self::fail('La extensión curl de PHP no está habilitada en este servidor.');
+        }
+
+        // Con reintentos, esta llamada puede tardar más que el límite por defecto
+        // de PHP en hosting compartido. Si la función está deshabilitada (algunos
+        // hostings la bloquean), simplemente se ignora sin romper nada.
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(100);
         }
 
         $cantidad = max(1, min(self::MAX_QUESTIONS, (int) ($params['cantidad'] ?? 10)));
@@ -225,36 +234,73 @@ PROMPT;
     {
         $url = sprintf(self::ENDPOINT_TEMPLATE, rawurlencode(GEMINI_MODEL), GEMINI_API_KEY);
 
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_POST           => true,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
-            CURLOPT_POSTFIELDS     => json_encode($requestBody),
-            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
-            CURLOPT_SSL_VERIFYPEER => true,
-        ]);
+        // Muchos hostings compartidos (InfinityFree incluido) traen el paquete
+        // de certificados raíz de cURL desactualizado o incompleto, lo que hace
+        // que CUALQUIER llamada HTTPS saliente falle con "SSL certificate
+        // problem: unable to get local issuer certificate" (curl errno 60),
+        // sin que tenga nada que ver con la API key ni con el código. Como no
+        // tenemos acceso al php.ini del servidor para arreglarlo ahí, se
+        // empaqueta un cacert.pem propio y se le indica a cURL que lo use.
+        $caBundle = __DIR__ . '/../config/cacert.pem';
 
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlErrno = curl_errno($ch);
-        $curlError = curl_error($ch);
-        curl_close($ch);
+        $lastError = '';
 
-        if ($response === false) {
-            return "Error de red al contactar Gemini (curl errno {$curlErrno}): {$curlError}";
+        for ($attempt = 1; $attempt <= self::MAX_RETRIES; $attempt++) {
+            $ch = curl_init($url);
+            $opts = [
+                CURLOPT_POST           => true,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+                CURLOPT_POSTFIELDS     => json_encode($requestBody),
+                CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
+                CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT_SECONDS,
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSL_VERIFYHOST => 2,
+            ];
+            if (is_readable($caBundle)) {
+                $opts[CURLOPT_CAINFO] = $caBundle;
+            }
+            curl_setopt_array($ch, $opts);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlErrno = curl_errno($ch);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+
+            if ($response !== false && $httpCode >= 200 && $httpCode < 300) {
+                $decoded = json_decode($response, true);
+                if (is_array($decoded)) {
+                    return $decoded;
+                }
+                $lastError = 'La respuesta de Gemini no es JSON válido: ' . substr((string) $response, 0, 300);
+                break; // no tiene sentido reintentar: la API respondió pero con algo no parseable
+            }
+
+            if ($response === false) {
+                $lastError = "Error de red al contactar Gemini (curl errno {$curlErrno}): {$curlError}";
+                // Errores típicamente transitorios (timeout, conexión, SSL intermitente
+                // en hosting compartido) sí vale la pena reintentar una vez más.
+                $transient = in_array($curlErrno, [6, 7, 28, 35, 52, 55, 56, 60], true);
+                if ($transient && $attempt < self::MAX_RETRIES) {
+                    usleep(400000); // 0.4s antes de reintentar
+                    continue;
+                }
+                break;
+            }
+
+            // HTTP fuera de rango 2xx: error de la API (modelo inválido, cuota,
+            // API key incorrecta, etc). Reintentar no ayuda si es 4xx; solo
+            // vale la pena en 5xx (error transitorio del lado de Google).
+            $lastError = "Gemini respondió HTTP {$httpCode}: " . substr((string) $response, 0, 500);
+            if ($httpCode >= 500 && $attempt < self::MAX_RETRIES) {
+                usleep(400000);
+                continue;
+            }
+            break;
         }
 
-        if ($httpCode < 200 || $httpCode >= 300) {
-            return "Gemini respondió HTTP {$httpCode}: " . substr((string) $response, 0, 500);
-        }
-
-        $decoded = json_decode($response, true);
-        if (!is_array($decoded)) {
-            return 'La respuesta de Gemini no es JSON válido: ' . substr((string) $response, 0, 300);
-        }
-
-        return $decoded;
+        return $lastError;
     }
 
     private static function extractTextFromResponse(array $response): ?string
