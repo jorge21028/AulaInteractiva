@@ -47,7 +47,7 @@ require __DIR__ . '/../includes/header.php';
 <p><a href="activity_edit.php?id=<?= (int) $activityId ?>">&larr; Volver a la actividad</a></p>
 
 <div class="card" style="text-align:center;">
-    <h1 style="margin-top:0;"><?= e($activity['title']) ?></h1>
+    <h1 style="margin-top:0;"><?= $activity['game_mode'] === 'sapito' ? '🐸 ' : '' ?><?= e($activity['title']) ?></h1>
     <p class="text-muted">Código de la partida — compártelo con tus estudiantes</p>
     <div style="font-size:3rem; font-weight:800; letter-spacing:6px; color:var(--color-primary-dark);" id="game-code"><?= e($game['code']) ?></div>
     <p class="text-muted" style="margin-top:8px;">

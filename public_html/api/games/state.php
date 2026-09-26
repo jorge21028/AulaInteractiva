@@ -50,7 +50,7 @@ if ($role === 'teacher') {
 $questions = activity_fetch_questions($pdo, (int) $game['activity_id']);
 $game = game_auto_advance_if_expired($pdo, $game, $questions);
 
-$activityStmt = $pdo->prepare('SELECT title, ranking_enabled FROM activities WHERE id = :id');
+$activityStmt = $pdo->prepare('SELECT title, ranking_enabled, game_mode FROM activities WHERE id = :id');
 $activityStmt->execute(['id' => $game['activity_id']]);
 $activity = $activityStmt->fetch();
 
@@ -65,6 +65,7 @@ $response = [
         'total_questions'       => count($questions),
         'activity_title'        => $activity['title'] ?? '',
         'ranking_enabled'       => (bool) ($activity['ranking_enabled'] ?? true),
+        'game_mode'             => $activity['game_mode'] ?? 'trivia',
         'players_count'         => count($players),
     ],
     'players' => array_map(fn($p) => ['nickname' => $p['nickname'], 'score' => (int) $p['score']], $players),

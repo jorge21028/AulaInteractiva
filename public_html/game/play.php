@@ -41,6 +41,59 @@ require __DIR__ . '/../includes/header.php';
   .match-item.selected { border-color:var(--color-primary); background:var(--color-primary-light); }
   .match-item.paired { border-color:var(--color-success); background:#E7F6EE; opacity:0.85; }
   .completar-input { width:100%; padding:14px; font-size:1.1rem; border:2px solid var(--color-border); border-radius:10px; margin-top:16px; text-align:center; }
+
+  /* --- Juego "El Sapito": arrastrar la respuesta al nenúfar correcto --- */
+  .sapito-pond {
+    position: relative;
+    margin-top: 20px;
+    min-height: 340px;
+    background: linear-gradient(180deg, #BEE3DB 0%, #8ECFC2 100%);
+    border-radius: 20px;
+    border: 3px solid #4FA898;
+    overflow: hidden;
+    touch-action: none;
+  }
+  .sapito-lilypad {
+    position: absolute;
+    width: 130px;
+    min-height: 90px;
+    background: radial-gradient(circle at 35% 30%, #7BC96F 0%, #4C9A4A 70%, #3E7F3D 100%);
+    border-radius: 50%;
+    border: 3px solid #2F6B30;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding: 10px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .sapito-lilypad.hover-target {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 4px #FFD166;
+  }
+  .sapito-lilypad.correct-flash { background: radial-gradient(circle at 35% 30%, #8EE08A 0%, #3E9E40 70%, #2C7A2E 100%); box-shadow: 0 0 0 4px #2ECC71; }
+  .sapito-lilypad.incorrect-flash { box-shadow: 0 0 0 4px #E74C3C; }
+  .sapito-frog {
+    position: absolute;
+    width: 64px;
+    height: 64px;
+    font-size: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    user-select: none;
+    z-index: 5;
+    filter: drop-shadow(0 3px 3px rgba(0,0,0,0.25));
+    touch-action: none;
+  }
+  .sapito-frog.dragging { cursor: grabbing; z-index: 10; }
+  .sapito-frog.locked { cursor: default; opacity: 0.6; }
+  .sapito-hint { text-align:center; margin-top:10px; }
 </style>
 
 <div id="play-panel" class="card"><p class="text-muted" style="text-align:center;">Cargando...</p></div>
@@ -80,6 +133,17 @@ function renderQuestion(g, q) {
         <div class="play-timer">${q.time_remaining}s</div>
     `;
 
+    if (g.game_mode === 'sapito' && q.type === 'multiple') {
+        const pads = q.options.map(o => `<div class="sapito-lilypad" data-id="${o.id}">🌼 ${o.text}</div>`).join('');
+        return header + `
+            <p class="sapito-hint text-muted">Arrastra la rana 🐸 hasta el nenúfar con la respuesta correcta</p>
+            <div class="sapito-pond" id="sapito-pond">
+                ${pads}
+                <div class="sapito-frog" id="sapito-frog">🐸</div>
+            </div>
+        `;
+    }
+
     if (q.type === 'multiple' || q.type === 'truefalse') {
         const optionsHtml = q.options.map(o => `<div class="play-option" data-id="${o.id}">${o.text}</div>`).join('');
         return header + `<div class="play-options">${optionsHtml}</div>`;
@@ -112,7 +176,84 @@ function renderQuestion(g, q) {
     return header;
 }
 
-function wireQuestionInteractions(q) {
+function wireSapitoDrag(q) {
+    const pond = document.getElementById('sapito-pond');
+    const frog = document.getElementById('sapito-frog');
+    if (!pond || !frog) return;
+
+    let dragging = false;
+    let answered = false;
+
+    const startLeft = () => (pond.clientWidth / 2) - (frog.offsetWidth / 2);
+    const startTop = () => pond.clientHeight - frog.offsetHeight - 10;
+    frog.style.left = startLeft() + 'px';
+    frog.style.top = startTop() + 'px';
+
+    function findPadAt(clientX, clientY) {
+        let found = null;
+        document.querySelectorAll('.sapito-lilypad').forEach(pad => {
+            const r = pad.getBoundingClientRect();
+            if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+                found = pad;
+            }
+        });
+        return found;
+    }
+
+    function movePointer(e) {
+        if (!dragging) return;
+        const rect = pond.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        frog.style.left = (x - frog.offsetWidth / 2) + 'px';
+        frog.style.top = (y - frog.offsetHeight / 2) + 'px';
+
+        document.querySelectorAll('.sapito-lilypad').forEach(pad => pad.classList.remove('hover-target'));
+        const pad = findPadAt(e.clientX, e.clientY);
+        if (pad) pad.classList.add('hover-target');
+    }
+
+    frog.addEventListener('pointerdown', (e) => {
+        if (answered) return;
+        dragging = true;
+        frog.classList.add('dragging');
+        frog.setPointerCapture(e.pointerId);
+        movePointer(e);
+    });
+
+    frog.addEventListener('pointermove', movePointer);
+
+    function onRelease(e) {
+        if (!dragging) return;
+        dragging = false;
+        frog.classList.remove('dragging');
+        document.querySelectorAll('.sapito-lilypad').forEach(pad => pad.classList.remove('hover-target'));
+
+        const pad = findPadAt(e.clientX, e.clientY);
+        if (pad) {
+            answered = true;
+            frog.classList.add('locked');
+            const rect = pond.getBoundingClientRect();
+            const padRect = pad.getBoundingClientRect();
+            frog.style.left = (padRect.left - rect.left + padRect.width / 2 - frog.offsetWidth / 2) + 'px';
+            frog.style.top = (padRect.top - rect.top + padRect.height / 2 - frog.offsetHeight / 2) + 'px';
+            pad.style.outline = '4px solid #FFD166';
+            sendAnswer(q.id, { option_id: parseInt(pad.dataset.id, 10) });
+        } else {
+            frog.style.left = startLeft() + 'px';
+            frog.style.top = startTop() + 'px';
+        }
+    }
+
+    frog.addEventListener('pointerup', onRelease);
+    frog.addEventListener('pointercancel', onRelease);
+}
+
+function wireQuestionInteractions(q, g) {
+    if (g && g.game_mode === 'sapito' && q.type === 'multiple') {
+        wireSapitoDrag(q);
+        return;
+    }
     if (q.type === 'multiple' || q.type === 'truefalse') {
         document.querySelectorAll('.play-option').forEach(el => {
             el.onclick = () => {
@@ -233,13 +374,13 @@ function render(data) {
         const q = data.question;
         if (q.already_answered) {
             panel.innerHTML = `
-                <h2 style="text-align:center;">¡Respuesta enviada!</h2>
+                <h2 style="text-align:center;">${g.game_mode === 'sapito' ? '¡La rana saltó! 🐸' : '¡Respuesta enviada!'}</h2>
                 <p class="text-muted" style="text-align:center;">Esperando al resto de tus compañeros...</p>
                 <div class="play-timer">${q.time_remaining}s</div>
             `;
         } else {
             panel.innerHTML = renderQuestion(g, q);
-            wireQuestionInteractions(q);
+            wireQuestionInteractions(q, g);
         }
     } else if (g.status === 'question_results') {
         const r = data.results;

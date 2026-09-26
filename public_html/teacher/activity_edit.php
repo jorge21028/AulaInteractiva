@@ -71,6 +71,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $points = max(10, (int) ($_POST['points'] ?? $activity['points_base']));
         $correctAnswer = clean_string($_POST['correct_answer'] ?? ''); // solo para 'completar'
 
+        // "El Sapito" es siempre de opción única: el estudiante arrastra la
+        // respuesta al nenúfar correcto, así que forzamos el tipo sin importar
+        // lo que llegue del formulario (defensa en el servidor, no solo en la UI).
+        if ($activity['game_mode'] === 'sapito') {
+            $type = 'multiple';
+        }
+
         $validTypes = ['multiple', 'truefalse', 'ordenar', 'relacionar', 'completar'];
 
         if (!in_array($type, $validTypes, true)) {
@@ -226,11 +233,17 @@ $pageTitle = $activity['title'];
 require __DIR__ . '/../includes/header.php';
 ?>
 <p><a href="activities.php">&larr; Volver a mis actividades</a></p>
-<h1><?= e($activity['title']) ?>
+<h1><?= $activity['game_mode'] === 'sapito' ? '🐸 ' : '' ?><?= e($activity['title']) ?>
     <span class="text-muted" style="font-size:0.9rem; font-weight:400;">
         (<?= $activity['status'] === 'published' ? 'Publicada' : 'Borrador' ?>)
     </span>
 </h1>
+<?php if ($activity['game_mode'] === 'sapito'): ?>
+    <p class="text-muted" style="margin-top:-8px;">
+        Actividad de integración "El Sapito": el estudiante arrastra la respuesta hasta el nenúfar correcto.
+        Cada pregunta tiene un enunciado y varias opciones (nenúfares); una es la correcta.
+    </p>
+<?php endif; ?>
 
 <?php foreach ($errors as $error): ?>
     <div class="alert alert-error"><?= e($error) ?></div>
@@ -364,14 +377,21 @@ require __DIR__ . '/../includes/header.php';
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="add_question">
 
-            <label for="type">Tipo de pregunta</label>
-            <select id="type" name="type" onchange="document.getElementById('completar-field').style.display = this.value === 'completar' ? 'block' : 'none';">
-                <option value="multiple">Selección múltiple</option>
-                <option value="truefalse">Verdadero/Falso</option>
-                <option value="ordenar">Ordenar elementos</option>
-                <option value="relacionar">Relacionar parejas</option>
-                <option value="completar">Completar espacios</option>
-            </select>
+            <?php if ($activity['game_mode'] === 'sapito'): ?>
+                <input type="hidden" name="type" value="multiple">
+                <p class="text-muted" style="font-size:0.85rem; margin-top:0;">
+                    Todas las preguntas de "El Sapito" son de opción única (varios nenúfares, uno correcto).
+                </p>
+            <?php else: ?>
+                <label for="type">Tipo de pregunta</label>
+                <select id="type" name="type" onchange="document.getElementById('completar-field').style.display = this.value === 'completar' ? 'block' : 'none';">
+                    <option value="multiple">Selección múltiple</option>
+                    <option value="truefalse">Verdadero/Falso</option>
+                    <option value="ordenar">Ordenar elementos</option>
+                    <option value="relacionar">Relacionar parejas</option>
+                    <option value="completar">Completar espacios</option>
+                </select>
+            <?php endif; ?>
 
             <label for="statement">Enunciado</label>
             <textarea id="statement" name="statement" rows="2" required placeholder="Escribe la pregunta..."></textarea>

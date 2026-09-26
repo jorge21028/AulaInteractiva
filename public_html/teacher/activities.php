@@ -26,6 +26,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
 
     $title = clean_string($_POST['title'] ?? '');
     $subjectId = (int) ($_POST['subject_id'] ?? 0);
+    $gameMode = clean_string($_POST['game_mode'] ?? 'trivia');
+    if (!in_array($gameMode, ['trivia', 'sapito'], true)) {
+        $gameMode = 'trivia';
+    }
 
     $validSubject = false;
     foreach ($subjects as $s) {
@@ -41,8 +45,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
         $errors[] = 'Selecciona una asignatura válida.';
     } else {
         $stmt = $pdo->prepare(
-            'INSERT INTO activities (subject_id, teacher_id, title, difficulty, time_per_question, points_base, speed_bonus_max, ranking_enabled, allow_repeat, team_mode, source, status, created_at)
-             VALUES (:subject_id, :teacher_id, :title, :difficulty, :time_per_question, 100, 50, 1, 1, 0, :source, :status, :created_at)'
+            'INSERT INTO activities (subject_id, teacher_id, title, difficulty, time_per_question, points_base, speed_bonus_max, ranking_enabled, allow_repeat, team_mode, game_mode, source, status, created_at)
+             VALUES (:subject_id, :teacher_id, :title, :difficulty, :time_per_question, 100, 50, 1, 1, 0, :game_mode, :source, :status, :created_at)'
         );
         $stmt->execute([
             'subject_id'        => $subjectId,
@@ -50,6 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
             'title'             => $title,
             'difficulty'        => 'media',
             'time_per_question' => 20,
+            'game_mode'         => $gameMode,
             'source'            => 'manual',
             'status'            => 'draft',
             'created_at'        => now_datetime(),
@@ -61,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
 }
 
 $listStmt = $pdo->prepare(
-    'SELECT a.id, a.title, a.status, a.difficulty,
+    'SELECT a.id, a.title, a.status, a.difficulty, a.game_mode,
         (SELECT COUNT(*) FROM activity_questions q WHERE q.activity_id = a.id) AS questions_count,
         s.name AS subject_name
      FROM activities a
@@ -108,6 +113,12 @@ require __DIR__ . '/../includes/header.php';
                 <?php endforeach; ?>
             </select>
 
+            <label for="game_mode">Tipo de actividad</label>
+            <select id="game_mode" name="game_mode">
+                <option value="trivia">🎯 Trivia clásica (preguntas y respuestas)</option>
+                <option value="sapito">🐸 El Sapito (arrastra la respuesta al nenúfar correcto)</option>
+            </select>
+
             <button type="submit" class="btn">Crear y continuar</button>
         </form>
     </section>
@@ -120,9 +131,10 @@ require __DIR__ . '/../includes/header.php';
             <div class="grid grid-2">
                 <?php foreach ($activities as $a): ?>
                     <a class="card" href="activity_edit.php?id=<?= (int) $a['id'] ?>" style="display:block;">
-                        <h3 style="margin-top:0;"><?= e($a['title']) ?></h3>
+                        <h3 style="margin-top:0;"><?= $a['game_mode'] === 'sapito' ? '🐸 ' : '' ?><?= e($a['title']) ?></h3>
                         <p class="text-muted" style="margin-bottom:4px;"><?= e($a['subject_name']) ?></p>
                         <p class="text-muted" style="margin-bottom:0; font-size:0.85rem;">
+                            <?= $a['game_mode'] === 'sapito' ? 'El Sapito' : 'Trivia' ?> ·
                             <?= (int) $a['questions_count'] ?> preguntas ·
                             <?= $a['status'] === 'published' ? 'Publicada' : 'Borrador' ?> ·
                             Dificultad: <?= e($a['difficulty']) ?>

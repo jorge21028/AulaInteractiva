@@ -60,7 +60,10 @@ require __DIR__ . '/../includes/header.php';
             const q = data.question;
             const imageHtml = q.image_url ? `<img src="${q.image_url}" style="max-width:100%; max-height:280px; border-radius:8px; display:block; margin:10px auto;">` : '';
             let bodyHtml = '';
-            if (q.type === 'multiple' || q.type === 'truefalse') {
+            if (g.game_mode === 'sapito' && q.type === 'multiple') {
+                bodyHtml = `<div class="projector-options" style="margin-top:20px;">${q.options.map(o => `<div class="projector-option" style="background:#4C9A4A; color:#fff; border-color:#2F6B30; border-radius:50%;">🌼 ${o.text}</div>`).join('')}</div>
+                    <p class="text-muted" style="text-align:center; margin-top:10px;">🐸 Cada estudiante arrastra su rana al nenúfar correcto</p>`;
+            } else if (q.type === 'multiple' || q.type === 'truefalse') {
                 bodyHtml = `<div class="projector-options" style="margin-top:20px;">${q.options.map(o => `<div class="projector-option">${o.text}</div>`).join('')}</div>`;
             } else if (q.type === 'ordenar') {
                 bodyHtml = `<div class="projector-options" style="margin-top:20px;">${q.items.map(i => `<div class="projector-option">${i.text}</div>`).join('')}</div>
