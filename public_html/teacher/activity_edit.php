@@ -78,14 +78,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $type = 'multiple';
         }
 
-        $validTypes = ['multiple', 'truefalse', 'ordenar', 'relacionar', 'completar'];
+        // "Ordenar", "relacionar" y "completar" fueron descontinuados: no funcionaban
+        // bien en la práctica. Se dejan solo para no romper actividades ya creadas
+        // con esos tipos, pero ya no se pueden crear preguntas nuevas de esos tipos.
+        $validTypes = ['multiple', 'truefalse'];
 
         if (!in_array($type, $validTypes, true)) {
             $errors[] = 'Tipo de pregunta inválido.';
         } elseif ($statement === '') {
             $errors[] = 'El enunciado no puede estar vacío.';
-        } elseif ($type === 'completar' && $correctAnswer === '') {
-            $errors[] = 'Indica la respuesta correcta para la pregunta de completar.';
         } else {
             $countStmt = $pdo->prepare('SELECT COUNT(*) AS total FROM activity_questions WHERE activity_id = :activity_id');
             $countStmt->execute(['activity_id' => $activityId]);
@@ -111,32 +112,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $optStmt->execute(['qid' => $questionId, 'text' => 'Falso', 'correct' => 0, 'order_index' => 1]);
             }
 
-            if ($type === 'completar') {
-                $pdo->prepare(
-                    'INSERT INTO question_options (question_id, text, is_correct, order_index) VALUES (:qid, :text, 1, 0)'
-                )->execute(['qid' => $questionId, 'text' => $correctAnswer]);
-            }
-
-            if ($type === 'ordenar') {
-                // Dos elementos de ejemplo para empezar; el profesor los edita/agrega desde la pantalla de la pregunta.
-                $optStmt = $pdo->prepare(
-                    'INSERT INTO question_options (question_id, text, is_correct, order_index) VALUES (:qid, :text, 1, :order_index)'
-                );
-                $optStmt->execute(['qid' => $questionId, 'text' => 'Primer elemento', 'order_index' => 0]);
-                $optStmt->execute(['qid' => $questionId, 'text' => 'Segundo elemento', 'order_index' => 1]);
-            }
-
-            if ($type === 'relacionar') {
-                $optStmt = $pdo->prepare(
-                    'INSERT INTO question_options (question_id, text, match_text, is_correct, order_index) VALUES (:qid, :text, :match_text, 1, :order_index)'
-                );
-                $optStmt->execute(['qid' => $questionId, 'text' => 'Elemento A', 'match_text' => 'Pareja A', 'order_index' => 0]);
-                $optStmt->execute(['qid' => $questionId, 'text' => 'Elemento B', 'match_text' => 'Pareja B', 'order_index' => 1]);
-            }
-
             $pdo->commit();
 
-            if (in_array($type, ['multiple', 'ordenar', 'relacionar', 'completar'], true)) {
+            if ($type === 'multiple') {
                 redirect('teacher/activity_question.php?id=' . $questionId);
             }
             $notice = 'Pregunta agregada.';
@@ -156,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qStmt->execute(['id' => $questionId, 'activity_id' => $activityId]);
         $q = $qStmt->fetch();
 
-        if ($q) {
+        if ($q && !in_array($q['type'], ['ordenar', 'relacionar', 'completar'], true)) {
             $countStmt = $pdo->prepare('SELECT COUNT(*) AS total FROM activity_questions WHERE activity_id = :activity_id');
             $countStmt->execute(['activity_id' => $activityId]);
             $orderIndex = (int) ($countStmt->fetch()['total'] ?? 0);
@@ -181,6 +159,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $insertOpt->execute(['qid' => $newQuestionId, 'text' => $o['text'], 'correct' => $o['is_correct'], 'order_index' => $o['order_index']]);
             }
             $notice = 'Pregunta duplicada.';
+        } elseif ($q) {
+            $errors[] = 'Este tipo de pregunta ya no se puede duplicar (fue descontinuado). Puedes eliminarla o dejarla como está.';
         }
     }
 
@@ -322,6 +302,7 @@ require __DIR__ . '/../includes/header.php';
             <p class="empty-state">Sin preguntas todavía.</p>
         <?php else: ?>
             <?php foreach ($questions as $i => $q): ?>
+                <?php $isDeprecatedType = in_array($q['type'], ['ordenar', 'relacionar', 'completar'], true); ?>
                 <div class="card" style="margin-bottom:10px; padding:14px 16px;">
                     <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
                         <div>
@@ -331,17 +312,25 @@ require __DIR__ . '/../includes/header.php';
                                 <?= (int) $q['time_seconds'] ?>s · <?= (int) $q['points'] ?> pts ·
                                 <?= count($q['options']) ?> opciones
                             </p>
+                            <?php if ($isDeprecatedType): ?>
+                                <p class="alert alert-error" style="margin:6px 0 0; padding:6px 10px; font-size:0.8rem;">
+                                    Este tipo de pregunta fue descontinuado (no siempre funcionaba bien). Te recomendamos
+                                    eliminarla y crear una de selección múltiple en su lugar.
+                                </p>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
                         <a class="btn btn-secondary" style="margin:0; padding:6px 12px; font-size:0.85rem;" href="activity_question.php?id=<?= (int) $q['id'] ?>">Editar</a>
 
+                        <?php if (!$isDeprecatedType): ?>
                         <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" style="display:inline;">
                             <?php csrf_field(); ?>
                             <input type="hidden" name="action" value="duplicate_question">
                             <input type="hidden" name="question_id" value="<?= (int) $q['id'] ?>">
                             <button type="submit" class="btn btn-secondary" style="margin:0; padding:6px 12px; font-size:0.85rem;">Duplicar</button>
                         </form>
+                        <?php endif; ?>
 
                         <?php if ($i > 0): ?>
                         <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" style="display:inline;">
@@ -384,25 +373,14 @@ require __DIR__ . '/../includes/header.php';
                 </p>
             <?php else: ?>
                 <label for="type">Tipo de pregunta</label>
-                <select id="type" name="type" onchange="document.getElementById('completar-field').style.display = this.value === 'completar' ? 'block' : 'none';">
+                <select id="type" name="type">
                     <option value="multiple">Selección múltiple</option>
                     <option value="truefalse">Verdadero/Falso</option>
-                    <option value="ordenar">Ordenar elementos</option>
-                    <option value="relacionar">Relacionar parejas</option>
-                    <option value="completar">Completar espacios</option>
                 </select>
             <?php endif; ?>
 
             <label for="statement">Enunciado</label>
             <textarea id="statement" name="statement" rows="2" required placeholder="Escribe la pregunta..."></textarea>
-
-            <div id="completar-field" style="display:none;">
-                <label for="correct_answer">Respuesta correcta</label>
-                <input type="text" id="correct_answer" name="correct_answer" placeholder="Ej: Madrid">
-                <p class="text-muted" style="font-size:0.8rem; margin-top:-8px;">
-                    Escribe el enunciado con un espacio en blanco (ej: "La capital de España es ____") y aquí la palabra correcta.
-                </p>
-            </div>
 
             <label for="time_seconds">Tiempo (segundos)</label>
             <input type="text" id="time_seconds" name="time_seconds" value="<?= (int) $activity['time_per_question'] ?>">
@@ -412,8 +390,8 @@ require __DIR__ . '/../includes/header.php';
 
             <button type="submit" class="btn">Agregar pregunta</button>
             <p class="text-muted" style="font-size:0.8rem; margin-top:8px;">
-                "Verdadero/Falso" y "Completar espacios" se crean de inmediato. Los demás tipos te llevarán a la pantalla
-                de la pregunta para agregar las opciones, el orden correcto o las parejas.
+                "Verdadero/Falso" se crea de inmediato. "Selección múltiple" te lleva a la pantalla de la pregunta
+                para agregar las opciones y marcar la correcta.
             </p>
         </form>
     </section>
