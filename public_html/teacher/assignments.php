@@ -25,15 +25,22 @@ $subjects = $subjStmt->fetchAll();
 
 // Actividades publicadas del profesor (solo esas se pueden asignar)
 $actStmt = $pdo->prepare(
-    "SELECT id, title, subject_id FROM activities WHERE teacher_id = :teacher_id AND status = 'published' ORDER BY title"
+    "SELECT id, title, subject_id, game_mode FROM activities WHERE teacher_id = :teacher_id AND status = 'published' ORDER BY title"
 );
 $actStmt->execute(['teacher_id' => $teacherId]);
 $activities = $actStmt->fetchAll();
 
+// Cuestionarios publicados del profesor
+$quizStmt = $pdo->prepare(
+    "SELECT id, title, subject_id FROM quizzes WHERE teacher_id = :teacher_id AND status = 'published' ORDER BY title"
+);
+$quizStmt->execute(['teacher_id' => $teacherId]);
+$quizzes = $quizStmt->fetchAll();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_assignment') {
     csrf_verify($_POST['csrf_token'] ?? null);
 
-    $mode = clean_string($_POST['mode'] ?? 'interactive'); // 'interactive' | 'creation'
+    $mode = clean_string($_POST['mode'] ?? 'interactive'); // 'interactive' | 'quiz' | 'creation'
     $title = clean_string($_POST['title'] ?? '');
     $description = clean_string($_POST['description'] ?? '');
     $startDate = clean_string($_POST['start_date'] ?? '');
@@ -41,6 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
     $points = max(1, (int) ($_POST['points'] ?? 100));
 
     $activityId = null;
+    $quizId = null;
     $projectType = null;
     $subjectId = null;
 
@@ -57,6 +65,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
             $errors[] = 'Selecciona una actividad publicada válida.';
         } else {
             $subjectId = (int) $activity['subject_id'];
+        }
+    } elseif ($mode === 'quiz') {
+        $quizId = (int) ($_POST['quiz_id'] ?? 0);
+        $quiz = null;
+        foreach ($quizzes as $q) {
+            if ((int) $q['id'] === $quizId) {
+                $quiz = $q;
+                break;
+            }
+        }
+        if (!$quiz) {
+            $errors[] = 'Selecciona un cuestionario publicado válido.';
+        } else {
+            $subjectId = (int) $quiz['subject_id'];
         }
     } else {
         $projectType = clean_string($_POST['project_type'] ?? '');
@@ -89,7 +111,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
                 $startDate !== '' ? $startDate . ' 00:00:00' : null,
                 $dueDate !== '' ? $dueDate . ' 23:59:59' : null,
                 $points,
-                $projectType
+                $projectType,
+                $quizId
             );
             audit_log($pdo, $teacherId, 'create_assignment', "Asignación '{$title}' creada");
             redirect('teacher/assignment_detail.php?id=' . $assignmentId);
@@ -101,11 +124,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
 }
 
 $listStmt = $pdo->prepare(
-    'SELECT a.id, a.title, a.due_date, a.points, a.project_type, act.title AS activity_title, s.name AS subject_name,
+    'SELECT a.id, a.title, a.due_date, a.points, a.project_type, act.title AS activity_title, qz.title AS quiz_title, s.name AS subject_name,
         (SELECT COUNT(*) FROM assignment_students ast WHERE ast.assignment_id = a.id) AS total_students,
         (SELECT COUNT(*) FROM submissions sub WHERE sub.assignment_id = a.id AND sub.status = "completed") AS completed_count
      FROM assignments a
      LEFT JOIN activities act ON act.id = a.activity_id
+     LEFT JOIN quizzes qz ON qz.id = a.quiz_id
      INNER JOIN subjects s ON s.id = a.subject_id
      WHERE a.teacher_id = :teacher_id
      ORDER BY a.created_at DESC'
@@ -132,10 +156,14 @@ require __DIR__ . '/../includes/header.php';
     <section class="card">
         <h2 style="margin-top:0;">Nueva asignación</h2>
 
-        <div style="display:flex; gap:16px; margin-bottom:16px;">
+        <div style="display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap;">
             <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;">
                 <input type="radio" name="mode_selector" value="interactive" checked style="width:auto;" onclick="toggleMode('interactive')">
                 Actividad interactiva
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;">
+                <input type="radio" name="mode_selector" value="quiz" style="width:auto;" onclick="toggleMode('quiz')">
+                Cuestionario
             </label>
             <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;">
                 <input type="radio" name="mode_selector" value="creation" style="width:auto;" onclick="toggleMode('creation')">
@@ -155,11 +183,27 @@ require __DIR__ . '/../includes/header.php';
                     <label for="activity_id">Actividad (debe estar publicada)</label>
                     <select id="activity_id" name="activity_id">
                         <?php foreach ($activities as $a): ?>
-                            <option value="<?= (int) $a['id'] ?>"><?= e($a['title']) ?></option>
+                            <option value="<?= (int) $a['id'] ?>"><?= $a['game_mode'] === 'sapito' ? '🐸 ' : '🎯 ' ?><?= e($a['title']) ?></option>
                         <?php endforeach; ?>
                     </select>
                     <p class="text-muted" style="font-size:0.8rem;">
                         Se juega en vivo: tú inicias la partida cuando quieras y la entrega se califica sola.
+                    </p>
+                <?php endif; ?>
+            </div>
+
+            <div id="mode-quiz" style="display:none;">
+                <?php if (empty($quizzes)): ?>
+                    <p class="text-muted">No tienes cuestionarios publicados todavía. <a href="quizzes.php">Crea uno</a>.</p>
+                <?php else: ?>
+                    <label for="quiz_id">Cuestionario (debe estar publicado)</label>
+                    <select id="quiz_id" name="quiz_id">
+                        <?php foreach ($quizzes as $q): ?>
+                            <option value="<?= (int) $q['id'] ?>">📝 <?= e($q['title']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <p class="text-muted" style="font-size:0.8rem;">
+                        El estudiante lo resuelve a su ritmo, dentro de la fecha límite. Se autocalifica al entregar.
                     </p>
                 <?php endif; ?>
             </div>
@@ -216,7 +260,13 @@ require __DIR__ . '/../includes/header.php';
                         <h3 style="margin-top:0;"><?= e($a['title']) ?></h3>
                         <p class="text-muted" style="margin-bottom:4px;">
                             <?= e($a['subject_name']) ?> ·
-                            <?= $a['activity_title'] ? e($a['activity_title']) : e(PROJECT_TYPES[$a['project_type']] ?? 'Trabajo') ?>
+                            <?php if ($a['activity_title']): ?>
+                                <?= e($a['activity_title']) ?>
+                            <?php elseif ($a['quiz_title']): ?>
+                                📝 <?= e($a['quiz_title']) ?>
+                            <?php else: ?>
+                                <?= e(PROJECT_TYPES[$a['project_type']] ?? 'Trabajo') ?>
+                            <?php endif; ?>
                         </p>
                         <p class="text-muted" style="margin-bottom:0; font-size:0.85rem;">
                             <?= (int) $a['completed_count'] ?> / <?= (int) $a['total_students'] ?> completadas ·
@@ -235,6 +285,7 @@ require __DIR__ . '/../includes/header.php';
     function toggleMode(mode) {
         document.getElementById('mode_field').value = mode;
         document.getElementById('mode-interactive').style.display = mode === 'interactive' ? 'block' : 'none';
+        document.getElementById('mode-quiz').style.display = mode === 'quiz' ? 'block' : 'none';
         document.getElementById('mode-creation').style.display = mode === 'creation' ? 'block' : 'none';
     }
     </script>

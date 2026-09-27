@@ -13,9 +13,10 @@ $notice = null;
 $errors = [];
 
 $stmt = $pdo->prepare(
-    'SELECT a.*, act.id AS activity_id, act.title AS activity_title, s.name AS subject_name
+    'SELECT a.*, act.id AS activity_id, act.title AS activity_title, act.game_mode, qz.title AS quiz_title, s.name AS subject_name
      FROM assignments a
      LEFT JOIN activities act ON act.id = a.activity_id
+     LEFT JOIN quizzes qz ON qz.id = a.quiz_id
      INNER JOIN subjects s ON s.id = a.subject_id
      WHERE a.id = :id AND a.teacher_id = :teacher_id LIMIT 1'
 );
@@ -52,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 }
 
 $rosterStmt = $pdo->prepare(
-    'SELECT sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id,
+    'SELECT sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id, sub.quiz_attempt_id,
         u.name AS student_name, u.email AS student_email
      FROM submissions sub
      INNER JOIN users u ON u.id = sub.student_id
@@ -69,7 +70,14 @@ require __DIR__ . '/../includes/header.php';
 <h1><?= e($assignment['title']) ?></h1>
 <p class="text-muted">
     <?= e($assignment['subject_name']) ?> ·
-    <?= $assignment['activity_title'] ? 'Actividad: ' . e($assignment['activity_title']) : e(PROJECT_TYPES[$assignment['project_type']] ?? 'Trabajo') ?> ·
+    <?php if ($assignment['activity_title']): ?>
+        Actividad: <?= e($assignment['activity_title']) ?>
+    <?php elseif ($assignment['quiz_title']): ?>
+        Cuestionario: 📝 <?= e($assignment['quiz_title']) ?>
+    <?php else: ?>
+        <?= e(PROJECT_TYPES[$assignment['project_type']] ?? 'Trabajo') ?>
+    <?php endif; ?>
+    ·
     <?= (int) $assignment['points'] ?> pts
     <?php if ($assignment['due_date']): ?>
         · Entrega: <?= e(date('d/m/Y', strtotime($assignment['due_date']))) ?>
@@ -116,6 +124,9 @@ require __DIR__ . '/../includes/header.php';
                         </p>
                         <?php if ($r['project_id']): ?>
                             <a href="view_project.php?id=<?= (int) $r['project_id'] ?>" style="font-size:0.85rem;">Ver trabajo entregado &rarr;</a>
+                        <?php endif; ?>
+                        <?php if ($r['quiz_attempt_id']): ?>
+                            <a href="quiz_review.php?id=<?= (int) $r['quiz_attempt_id'] ?>" style="font-size:0.85rem;">Ver intento &rarr;</a>
                         <?php endif; ?>
                     </div>
                 </div>

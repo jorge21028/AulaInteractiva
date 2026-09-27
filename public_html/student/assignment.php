@@ -11,10 +11,12 @@ $studentId = current_user_id();
 $assignmentId = (int) ($_GET['id'] ?? 0);
 
 $stmt = $pdo->prepare(
-    'SELECT a.*, act.id AS activity_id, act.title AS activity_title, s.name AS subject_name,
+    'SELECT a.*, act.id AS activity_id, act.title AS activity_title, qz.id AS quiz_id, qz.title AS quiz_title,
+        qz.time_limit_minutes, qz.max_attempts, s.name AS subject_name,
         sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id
      FROM assignments a
      LEFT JOIN activities act ON act.id = a.activity_id
+     LEFT JOIN quizzes qz ON qz.id = a.quiz_id
      INNER JOIN subjects s ON s.id = a.subject_id
      INNER JOIN submissions sub ON sub.assignment_id = a.id AND sub.student_id = :student_id
      WHERE a.id = :id LIMIT 1'
@@ -28,7 +30,18 @@ if (!$assignment) {
 }
 
 $isOverdue = $assignment['due_date'] && strtotime($assignment['due_date']) < time();
-$isCreation = $assignment['activity_id'] === null;
+$isQuiz = $assignment['quiz_id'] !== null;
+$isCreation = $assignment['activity_id'] === null && !$isQuiz;
+
+// Intentos de cuestionario ya usados (para mostrar cuántos le quedan)
+$quizAttemptsUsed = 0;
+if ($isQuiz) {
+    $usedStmt = $pdo->prepare(
+        "SELECT COUNT(*) AS total FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id AND status = 'submitted'"
+    );
+    $usedStmt->execute(['quiz_id' => $assignment['quiz_id'], 'student_id' => $studentId]);
+    $quizAttemptsUsed = (int) ($usedStmt->fetch()['total'] ?? 0);
+}
 
 // Si es un trabajo de creación y todavía está pendiente, aseguramos que
 // exista el borrador para poder enlazar directo al editor.
@@ -54,7 +67,14 @@ require __DIR__ . '/../includes/header.php';
 <h1><?= e($assignment['title']) ?></h1>
 <p class="text-muted">
     <?= e($assignment['subject_name']) ?> ·
-    <?= $isCreation ? e(PROJECT_TYPES[$assignment['project_type']] ?? 'Trabajo') : 'Actividad: ' . e($assignment['activity_title']) ?> ·
+    <?php if ($isQuiz): ?>
+        Cuestionario: 📝 <?= e($assignment['quiz_title']) ?>
+    <?php elseif ($isCreation): ?>
+        <?= e(PROJECT_TYPES[$assignment['project_type']] ?? 'Trabajo') ?>
+    <?php else: ?>
+        Actividad: <?= e($assignment['activity_title']) ?>
+    <?php endif; ?>
+    ·
     <?= (int) $assignment['points'] ?> pts
     <?php if ($assignment['due_date']): ?>
         · Entrega: <?= e(date('d/m/Y', strtotime($assignment['due_date']))) ?>
@@ -89,6 +109,16 @@ require __DIR__ . '/../includes/header.php';
                 Ver mi trabajo entregado
             </a>
         <?php endif; ?>
+        <?php if ($isQuiz): ?>
+            <a class="btn btn-secondary" href="quiz_attempt.php?assignment_id=<?= (int) $assignmentId ?>&review=1">
+                Ver mi revisión
+            </a>
+            <?php if ($quizAttemptsUsed < (int) $assignment['max_attempts'] && !$isOverdue): ?>
+                <a class="btn" href="quiz_attempt.php?assignment_id=<?= (int) $assignmentId ?>">
+                    Intentar de nuevo (<?= $quizAttemptsUsed ?>/<?= (int) $assignment['max_attempts'] ?> usados)
+                </a>
+            <?php endif; ?>
+        <?php endif; ?>
     </div>
 <?php elseif ($isCreation): ?>
     <div class="card" style="text-align:center;">
@@ -97,6 +127,21 @@ require __DIR__ . '/../includes/header.php';
         <a class="btn" href="<?= e(rtrim(APP_URL, '/')) ?>/editor/<?= e($editorUrlByType[$assignment['project_type']] ?? '') ?>?project_id=<?= (int) $project['id'] ?>">
             Abrir editor
         </a>
+    </div>
+<?php elseif ($isQuiz): ?>
+    <div class="card" style="text-align:center;">
+        <h2 style="margin-top:0;">⏳ Pendiente</h2>
+        <p class="text-muted">
+            Lo resuelves a tu propio ritmo<?= $assignment['time_limit_minutes'] ? ', con ' . (int) $assignment['time_limit_minutes'] . ' minutos por intento' : '' ?>.
+            Tienes <?= (int) $assignment['max_attempts'] ?> intento<?= (int) $assignment['max_attempts'] === 1 ? '' : 's' ?> disponible<?= (int) $assignment['max_attempts'] === 1 ? '' : 's' ?>.
+        </p>
+        <?php if ($isOverdue): ?>
+            <p style="color:var(--color-danger);">La fecha de entrega ya venció.</p>
+        <?php else: ?>
+            <a class="btn" href="quiz_attempt.php?assignment_id=<?= (int) $assignmentId ?>">
+                <?= $quizAttemptsUsed > 0 ? 'Continuar' : 'Comenzar cuestionario' ?>
+            </a>
+        <?php endif; ?>
     </div>
 <?php else: ?>
     <div class="card" id="pending-panel" style="text-align:center;">

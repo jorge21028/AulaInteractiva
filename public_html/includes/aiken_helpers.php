@@ -160,3 +160,50 @@ function aiken_import_into_activity(PDO $pdo, int $activityId, array $parsedQues
 
     return $inserted;
 }
+
+/**
+ * Igual que aiken_import_into_activity, pero para el módulo de Cuestionario
+ * (tablas quiz_questions / quiz_options en vez de activity_questions / question_options).
+ */
+function aiken_import_into_quiz(PDO $pdo, int $quizId, array $parsedQuestions, int $defaultPoints): int
+{
+    $countStmt = $pdo->prepare('SELECT COUNT(*) AS total FROM quiz_questions WHERE quiz_id = :quiz_id');
+    $countStmt->execute(['quiz_id' => $quizId]);
+    $orderIndex = (int) ($countStmt->fetch()['total'] ?? 0);
+
+    $insertQ = $pdo->prepare(
+        'INSERT INTO quiz_questions (quiz_id, type, statement, points, order_index, created_at)
+         VALUES (:quiz_id, :type, :statement, :points, :order_index, :created_at)'
+    );
+    $insertOpt = $pdo->prepare(
+        'INSERT INTO quiz_options (question_id, text, is_correct, order_index) VALUES (:qid, :text, :correct, :order_index)'
+    );
+
+    $inserted = 0;
+
+    foreach ($parsedQuestions as $q) {
+        $insertQ->execute([
+            'quiz_id'     => $quizId,
+            'type'        => 'multiple',
+            'statement'   => $q['statement'],
+            'points'      => $defaultPoints,
+            'order_index' => $orderIndex,
+            'created_at'  => now_datetime(),
+        ]);
+        $questionId = (int) $pdo->lastInsertId();
+        $orderIndex++;
+
+        foreach ($q['options'] as $optIndex => $opt) {
+            $insertOpt->execute([
+                'qid'        => $questionId,
+                'text'       => $opt['text'],
+                'correct'    => $opt['letter'] === $q['answer_letter'] ? 1 : 0,
+                'order_index'=> $optIndex,
+            ]);
+        }
+
+        $inserted++;
+    }
+
+    return $inserted;
+}
