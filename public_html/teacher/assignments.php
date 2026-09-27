@@ -7,6 +7,36 @@ require_once __DIR__ . '/../includes/project_helpers.php';
 
 require_role('teacher');
 
+/**
+ * Devuelve el HTML de una tarjeta de asignación para el listado agrupado.
+ */
+function render_assignment_card(array $a): string
+{
+    ob_start();
+    ?>
+    <a class="card" href="assignment_detail.php?id=<?= (int) $a['id'] ?>" style="display:block;">
+        <h3 style="margin-top:0; font-size:1rem;"><?= e($a['title']) ?></h3>
+        <p class="text-muted" style="margin-bottom:4px; font-size:0.85rem;">
+            <?php if ($a['activity_title']): ?>
+                <?= e($a['activity_title']) ?>
+            <?php elseif ($a['quiz_title']): ?>
+                📝 <?= e($a['quiz_title']) ?>
+            <?php else: ?>
+                <?= e(PROJECT_TYPES[$a['project_type']] ?? 'Trabajo') ?>
+            <?php endif; ?>
+        </p>
+        <p class="text-muted" style="margin-bottom:0; font-size:0.85rem;">
+            <?= (int) $a['completed_count'] ?> / <?= (int) $a['total_students'] ?> completadas ·
+            <?= (int) $a['points'] ?> pts
+            <?php if ($a['due_date']): ?>
+                · Entrega: <?= e(date('d/m/Y', strtotime($a['due_date']))) ?>
+            <?php endif; ?>
+        </p>
+    </a>
+    <?php
+    return ob_get_clean();
+}
+
 $pdo = Database::getConnection();
 $teacherId = current_user_id();
 $errors = [];
@@ -124,18 +154,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
 }
 
 $listStmt = $pdo->prepare(
-    'SELECT a.id, a.title, a.due_date, a.points, a.project_type, act.title AS activity_title, qz.title AS quiz_title, s.name AS subject_name,
+    'SELECT a.id, a.title, a.due_date, a.points, a.project_type, a.subject_id, act.title AS activity_title, qz.title AS quiz_title,
+        s.name AS subject_name, s.course_id, c.name AS course_name,
         (SELECT COUNT(*) FROM assignment_students ast WHERE ast.assignment_id = a.id) AS total_students,
-        (SELECT COUNT(*) FROM submissions sub WHERE sub.assignment_id = a.id AND sub.status = "completed") AS completed_count
+        (SELECT COUNT(*) FROM submissions sub WHERE sub.assignment_id = a.id AND sub.status = "completed") AS completed_count,
+        (SELECT COUNT(*) FROM submissions sub WHERE sub.assignment_id = a.id AND sub.status = "completed"
+            AND sub.project_id IS NOT NULL AND sub.reviewed_at IS NULL) AS needs_grading_count
      FROM assignments a
      LEFT JOIN activities act ON act.id = a.activity_id
      LEFT JOIN quizzes qz ON qz.id = a.quiz_id
      INNER JOIN subjects s ON s.id = a.subject_id
+     INNER JOIN courses c ON c.id = s.course_id
      WHERE a.teacher_id = :teacher_id
-     ORDER BY a.created_at DESC'
+     ORDER BY c.name ASC, s.name ASC, a.created_at DESC'
 );
 $listStmt->execute(['teacher_id' => $teacherId]);
 $assignments = $listStmt->fetchAll();
+
+// Agrupadas por curso → asignatura → calificadas / no calificadas ("no
+// calificada" = tiene al menos un trabajo de creación entregado que todavía
+// no revisaste; las que se autocalifican solas —Trivia, Sapito, Cuestionario—
+// caen en "calificadas" apenas alguien las completa, porque no requieren tu acción).
+$coursesForList = []; // course_id => ['name' => ..., 'subjects' => [subject_id => ['name'=>.., 'items'=>['ungraded'=>[], 'graded'=>[]]]]]
+foreach ($assignments as $a) {
+    $cid = (int) $a['course_id'];
+    $sid = (int) $a['subject_id'];
+    if (!isset($coursesForList[$cid])) {
+        $coursesForList[$cid] = ['name' => $a['course_name'], 'subjects' => []];
+    }
+    if (!isset($coursesForList[$cid]['subjects'][$sid])) {
+        $coursesForList[$cid]['subjects'][$sid] = ['name' => $a['subject_name'], 'ungraded' => [], 'graded' => []];
+    }
+    $bucket = (int) $a['needs_grading_count'] > 0 ? 'ungraded' : 'graded';
+    $coursesForList[$cid]['subjects'][$sid][$bucket][] = $a;
+}
 
 $pageTitle = 'Asignaciones';
 require __DIR__ . '/../includes/header.php';
@@ -251,33 +303,50 @@ require __DIR__ . '/../includes/header.php';
 
     <section class="card" style="margin-top:16px;">
         <h2 style="margin-top:0;">Mis asignaciones</h2>
-        <?php if (empty($assignments)): ?>
+        <?php if (empty($coursesForList)): ?>
             <p class="empty-state">Aún no has creado asignaciones.</p>
         <?php else: ?>
-            <div class="grid grid-2">
-                <?php foreach ($assignments as $a): ?>
-                    <a class="card" href="assignment_detail.php?id=<?= (int) $a['id'] ?>" style="display:block;">
-                        <h3 style="margin-top:0;"><?= e($a['title']) ?></h3>
-                        <p class="text-muted" style="margin-bottom:4px;">
-                            <?= e($a['subject_name']) ?> ·
-                            <?php if ($a['activity_title']): ?>
-                                <?= e($a['activity_title']) ?>
-                            <?php elseif ($a['quiz_title']): ?>
-                                📝 <?= e($a['quiz_title']) ?>
-                            <?php else: ?>
-                                <?= e(PROJECT_TYPES[$a['project_type']] ?? 'Trabajo') ?>
-                            <?php endif; ?>
-                        </p>
-                        <p class="text-muted" style="margin-bottom:0; font-size:0.85rem;">
-                            <?= (int) $a['completed_count'] ?> / <?= (int) $a['total_students'] ?> completadas ·
-                            <?= (int) $a['points'] ?> pts
-                            <?php if ($a['due_date']): ?>
-                                · Entrega: <?= e(date('d/m/Y', strtotime($a['due_date']))) ?>
-                            <?php endif; ?>
-                        </p>
-                    </a>
-                <?php endforeach; ?>
-            </div>
+            <?php foreach ($coursesForList as $courseGroup): ?>
+                <div style="margin-bottom:18px;">
+                    <h3 style="margin-bottom:8px;"><?= e($courseGroup['name']) ?></h3>
+                    <?php foreach ($courseGroup['subjects'] as $subjectGroup): ?>
+                        <?php $ungradedCount = count($subjectGroup['ungraded']); ?>
+                        <details style="margin-bottom:8px;" <?= $ungradedCount > 0 ? 'open' : '' ?>>
+                            <summary style="cursor:pointer; padding:6px 0; font-weight:600;">
+                                <?= e($subjectGroup['name']) ?>
+                                <?php if ($ungradedCount > 0): ?>
+                                    <span style="color:#C0392B; font-weight:400;"> — <?= $ungradedCount ?> por calificar</span>
+                                <?php else: ?>
+                                    <span class="text-muted" style="font-weight:400;"> — al día</span>
+                                <?php endif; ?>
+                            </summary>
+                            <div style="padding:6px 4px 4px;">
+                                <h4 style="margin-bottom:8px;">🔴 No calificadas (esperando tu revisión)</h4>
+                                <?php if (empty($subjectGroup['ungraded'])): ?>
+                                    <p class="empty-state" style="padding:6px 0; font-size:0.85rem;">Nada pendiente de calificar aquí.</p>
+                                <?php else: ?>
+                                    <div class="grid grid-2">
+                                        <?php foreach ($subjectGroup['ungraded'] as $a): ?>
+                                            <?= render_assignment_card($a) ?>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
+
+                                <h4 style="margin:14px 0 8px;">✅ Calificadas / sin pendientes</h4>
+                                <?php if (empty($subjectGroup['graded'])): ?>
+                                    <p class="empty-state" style="padding:6px 0; font-size:0.85rem;">Todavía no hay ninguna aquí.</p>
+                                <?php else: ?>
+                                    <div class="grid grid-2">
+                                        <?php foreach ($subjectGroup['graded'] as $a): ?>
+                                            <?= render_assignment_card($a) ?>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        </details>
+                    <?php endforeach; ?>
+                </div>
+            <?php endforeach; ?>
         <?php endif; ?>
     </section>
 

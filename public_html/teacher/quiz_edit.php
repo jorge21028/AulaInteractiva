@@ -20,6 +20,18 @@ if (!$quiz) {
     exit('Cuestionario no encontrado.');
 }
 
+// Asignaturas del profesor (para poder mover el cuestionario a otra)
+$subjStmt = $pdo->prepare(
+    'SELECT s.id, s.name, c.name AS course_name
+     FROM subjects s
+     INNER JOIN courses c ON c.id = s.course_id
+     INNER JOIN teacher_courses tc ON tc.course_id = c.id
+     WHERE tc.teacher_id = :teacher_id
+     ORDER BY c.name, s.name'
+);
+$subjStmt->execute(['teacher_id' => $teacherId]);
+$subjects = $subjStmt->fetchAll();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify($_POST['csrf_token'] ?? null);
     $action = $_POST['action'] ?? '';
@@ -33,17 +45,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $maxAttempts = max(1, (int) ($_POST['max_attempts'] ?? 1));
         $questionsPerAttemptRaw = trim($_POST['questions_per_attempt'] ?? '');
         $questionsPerAttempt = $questionsPerAttemptRaw === '' ? null : max(1, (int) $questionsPerAttemptRaw);
+        $subjectId = (int) ($_POST['subject_id'] ?? $quiz['subject_id']);
+
+        $validSubject = false;
+        foreach ($subjects as $s) {
+            if ((int) $s['id'] === $subjectId) {
+                $validSubject = true;
+                break;
+            }
+        }
 
         if ($title === '') {
             $errors[] = 'El título no puede estar vacío.';
+        } elseif (!$validSubject) {
+            $errors[] = 'Selecciona una asignatura válida.';
         } else {
             $pdo->prepare(
                 'UPDATE quizzes SET title = :title, description = :description, instructions = :instructions,
+                    subject_id = :subject_id,
                     time_limit_minutes = :time_limit_minutes, max_attempts = :max_attempts,
                     questions_per_attempt = :questions_per_attempt, updated_at = :updated_at
                  WHERE id = :id AND teacher_id = :teacher_id'
             )->execute([
                 'title' => $title, 'description' => $description, 'instructions' => $instructions,
+                'subject_id' => $subjectId,
                 'time_limit_minutes' => $timeLimit, 'max_attempts' => $maxAttempts,
                 'questions_per_attempt' => $questionsPerAttempt,
                 'updated_at' => now_datetime(), 'id' => $quizId, 'teacher_id' => $teacherId,
@@ -232,6 +257,15 @@ require __DIR__ . '/../includes/header.php';
 
             <label for="title">Título</label>
             <input type="text" id="title" name="title" required value="<?= e($quiz['title']) ?>">
+
+            <label for="subject_id">Asignatura</label>
+            <select id="subject_id" name="subject_id">
+                <?php foreach ($subjects as $s): ?>
+                    <option value="<?= (int) $s['id'] ?>" <?= (int) $quiz['subject_id'] === (int) $s['id'] ? 'selected' : '' ?>>
+                        <?= e($s['course_name']) ?> — <?= e($s['name']) ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
 
             <label for="description">Descripción</label>
             <textarea id="description" name="description" rows="2"><?= e($quiz['description']) ?></textarea>

@@ -75,3 +75,47 @@ function course_find_by_code(PDO $pdo, string $code): ?array
     $stmt->execute(['code' => strtoupper(trim($code))]);
     return $stmt->fetch() ?: null;
 }
+
+/**
+ * Quita a un estudiante de un curso (y por lo tanto de todas sus
+ * asignaturas, ya que la inscripción es a nivel curso). Se conserva el
+ * historial de trabajo ya calificado (submissions 'completed'), pero se
+ * eliminan las tareas pendientes de ese curso que ya no le corresponden.
+ */
+function course_unenroll_student(PDO $pdo, int $courseId, int $studentId): void
+{
+    $pdo->beginTransaction();
+    try {
+        $assignStmt = $pdo->prepare(
+            'SELECT a.id FROM assignments a
+             INNER JOIN subjects s ON s.id = a.subject_id
+             WHERE s.course_id = :course_id'
+        );
+        $assignStmt->execute(['course_id' => $courseId]);
+        $assignmentIds = $assignStmt->fetchAll(PDO::FETCH_COLUMN);
+
+        if (!empty($assignmentIds)) {
+            $in = implode(',', array_fill(0, count($assignmentIds), '?'));
+
+            $delSub = $pdo->prepare(
+                "DELETE FROM submissions WHERE student_id = ? AND status = 'pending' AND assignment_id IN ($in)"
+            );
+            $delSub->execute(array_merge([$studentId], $assignmentIds));
+
+            $delAsg = $pdo->prepare(
+                "DELETE ast FROM assignment_students ast
+                 LEFT JOIN submissions sub ON sub.assignment_id = ast.assignment_id AND sub.student_id = ast.student_id
+                 WHERE ast.student_id = ? AND sub.id IS NULL AND ast.assignment_id IN ($in)"
+            );
+            $delAsg->execute(array_merge([$studentId], $assignmentIds));
+        }
+
+        $pdo->prepare('DELETE FROM course_students WHERE course_id = :course_id AND student_id = :student_id')
+            ->execute(['course_id' => $courseId, 'student_id' => $studentId]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        error_log('course_unenroll_student error: ' . $e->getMessage());
+    }
+}

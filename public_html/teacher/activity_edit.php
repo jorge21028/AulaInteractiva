@@ -26,6 +26,18 @@ if (!$activity) {
     exit('Actividad no encontrada.');
 }
 
+// Asignaturas del profesor (para poder mover la actividad a otra)
+$subjStmt = $pdo->prepare(
+    'SELECT s.id, s.name, c.name AS course_name
+     FROM subjects s
+     INNER JOIN courses c ON c.id = s.course_id
+     INNER JOIN teacher_courses tc ON tc.course_id = c.id
+     WHERE tc.teacher_id = :teacher_id
+     ORDER BY c.name, s.name'
+);
+$subjStmt->execute(['teacher_id' => $teacherId]);
+$subjects = $subjStmt->fetchAll();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify($_POST['csrf_token'] ?? null);
     $action = $_POST['action'] ?? '';
@@ -41,14 +53,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $rankingEnabled = isset($_POST['ranking_enabled']) ? 1 : 0;
         $allowRepeat = isset($_POST['allow_repeat']) ? 1 : 0;
         $teamMode = isset($_POST['team_mode']) ? 1 : 0;
+        $subjectId = (int) ($_POST['subject_id'] ?? $activity['subject_id']);
+
+        $validSubject = false;
+        foreach ($subjects as $s) {
+            if ((int) $s['id'] === $subjectId) {
+                $validSubject = true;
+                break;
+            }
+        }
 
         if ($title === '') {
             $errors[] = 'El título no puede estar vacío.';
         } elseif (!in_array($difficulty, ['facil', 'media', 'dificil'], true)) {
             $errors[] = 'Dificultad inválida.';
+        } elseif (!$validSubject) {
+            $errors[] = 'Selecciona una asignatura válida.';
         } else {
             $stmt = $pdo->prepare(
                 'UPDATE activities SET title = :title, description = :description, instructions = :instructions,
+                    subject_id = :subject_id,
                     difficulty = :difficulty, time_per_question = :time_per_question, points_base = :points_base,
                     speed_bonus_max = :speed_bonus_max, ranking_enabled = :ranking_enabled, allow_repeat = :allow_repeat,
                     team_mode = :team_mode, updated_at = :updated_at
@@ -56,6 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
             $stmt->execute([
                 'title' => $title, 'description' => $description, 'instructions' => $instructions,
+                'subject_id' => $subjectId,
                 'difficulty' => $difficulty, 'time_per_question' => $timePerQuestion, 'points_base' => $pointsBase,
                 'speed_bonus_max' => $speedBonusMax, 'ranking_enabled' => $rankingEnabled, 'allow_repeat' => $allowRepeat,
                 'team_mode' => $teamMode, 'updated_at' => now_datetime(), 'id' => $activityId, 'teacher_id' => $teacherId,
@@ -271,6 +296,15 @@ require __DIR__ . '/../includes/header.php';
 
             <label for="title">Título</label>
             <input type="text" id="title" name="title" required value="<?= e($activity['title']) ?>">
+
+            <label for="subject_id">Asignatura</label>
+            <select id="subject_id" name="subject_id">
+                <?php foreach ($subjects as $s): ?>
+                    <option value="<?= (int) $s['id'] ?>" <?= (int) $activity['subject_id'] === (int) $s['id'] ? 'selected' : '' ?>>
+                        <?= e($s['course_name']) ?> — <?= e($s['name']) ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
 
             <label for="description">Descripción</label>
             <textarea id="description" name="description" rows="3"><?= e($activity['description']) ?></textarea>

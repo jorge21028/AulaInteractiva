@@ -30,24 +30,21 @@ if (!empty($courses)) {
     }
 }
 
-// Actividades pendientes (todas las asignaciones de este estudiante)
-$pendingStmt = $pdo->prepare(
-    "SELECT a.id, a.title, a.due_date, a.points, s.name AS subject_name, sub.status
+// Todas las asignaciones de este estudiante, con su asignatura
+$allStmt = $pdo->prepare(
+    "SELECT a.id, a.title, a.due_date, a.points, a.subject_id, sub.status
      FROM submissions sub
      INNER JOIN assignments a ON a.id = sub.assignment_id
-     INNER JOIN subjects s ON s.id = a.subject_id
      WHERE sub.student_id = :student_id
-     ORDER BY (sub.status = 'pending') DESC, a.due_date IS NULL, a.due_date ASC"
+     ORDER BY a.due_date IS NULL, a.due_date ASC, a.title ASC"
 );
-$pendingStmt->execute(['student_id' => $studentId]);
-$assignments = $pendingStmt->fetchAll();
+$allStmt->execute(['student_id' => $studentId]);
 
-// Contar pendientes por asignatura, para las tarjetas de abajo
-$pendingCountBySubject = [];
-foreach ($assignments as $a) {
-    if ($a['status'] === 'pending') {
-        $pendingCountBySubject[$a['subject_name']] = ($pendingCountBySubject[$a['subject_name']] ?? 0) + 1;
-    }
+// Agrupadas por asignatura y estado, listas para renderizar sin más consultas
+$assignmentsBySubject = [];
+foreach ($allStmt->fetchAll() as $a) {
+    $bucket = $a['status'] === 'completed' ? 'completed' : 'pending';
+    $assignmentsBySubject[$a['subject_id']][$bucket][] = $a;
 }
 
 $pageTitle = 'Panel del estudiante';
@@ -59,27 +56,6 @@ require __DIR__ . '/../includes/header.php';
     <a class="btn" href="<?= e(rtrim(APP_URL, '/')) ?>/game/join.php">Unirse a un juego con un código</a>
     <a class="btn btn-secondary" href="<?= e(rtrim(APP_URL, '/')) ?>/student/join_course.php">Unirme a una asignatura</a>
 </p>
-
-<section class="card">
-    <h2 style="margin-top:0;">Actividades pendientes</h2>
-    <?php $pending = array_filter($assignments, fn($a) => $a['status'] === 'pending'); ?>
-    <?php if (empty($pending)): ?>
-        <p class="empty-state">No tienes actividades pendientes por ahora.</p>
-    <?php else: ?>
-        <?php foreach ($pending as $a): ?>
-            <a class="card" href="assignment.php?id=<?= (int) $a['id'] ?>" style="display:block; margin-bottom:8px; padding:12px 16px;">
-                <strong><?= e($a['title']) ?></strong>
-                <span class="text-muted"> — <?= e($a['subject_name']) ?></span>
-                <p class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">
-                    <?= (int) $a['points'] ?> pts
-                    <?php if ($a['due_date']): ?>
-                        · Entrega: <?= e(date('d/m/Y', strtotime($a['due_date']))) ?>
-                    <?php endif; ?>
-                </p>
-            </a>
-        <?php endforeach; ?>
-    <?php endif; ?>
-</section>
 
 <h2 style="margin-top:24px;">Mis asignaturas</h2>
 
@@ -96,34 +72,55 @@ require __DIR__ . '/../includes/header.php';
             <?php if (empty($subjects)): ?>
                 <p class="empty-state" style="padding:12px 0;">Este curso todavía no tiene asignaturas.</p>
             <?php else: ?>
-                <div class="grid grid-3">
-                    <?php foreach ($subjects as $subj): ?>
-                        <div class="card">
-                            <strong><?= e($subj['name']) ?></strong>
-                            <p class="text-muted" style="margin-bottom:0; font-size:0.85rem;">
-                                <?= (int) ($pendingCountBySubject[$subj['name']] ?? 0) ?> actividad(es) pendiente(s)
-                            </p>
+                <?php foreach ($subjects as $subj): ?>
+                    <?php
+                        $pending = $assignmentsBySubject[$subj['id']]['pending'] ?? [];
+                        $completed = $assignmentsBySubject[$subj['id']]['completed'] ?? [];
+                        $pendingCount = count($pending);
+                    ?>
+                    <details style="margin-bottom:10px;" <?= $pendingCount > 0 ? 'open' : '' ?>>
+                        <summary style="cursor:pointer; padding:8px 0; font-weight:600;">
+                            <?= e($subj['name']) ?>
+                            <?php if ($pendingCount > 0): ?>
+                                <span class="text-muted" style="font-weight:400;"> — <?= $pendingCount ?> pendiente<?= $pendingCount === 1 ? '' : 's' ?></span>
+                            <?php else: ?>
+                                <span class="text-muted" style="font-weight:400;"> — al día</span>
+                            <?php endif; ?>
+                        </summary>
+
+                        <div style="padding:8px 4px 4px;">
+                            <h4 style="margin-bottom:8px;">⏳ Pendientes</h4>
+                            <?php if (empty($pending)): ?>
+                                <p class="empty-state" style="padding:8px 0; font-size:0.85rem;">Sin actividades pendientes en esta asignatura.</p>
+                            <?php else: ?>
+                                <?php foreach ($pending as $a): ?>
+                                    <a class="card" href="assignment.php?id=<?= (int) $a['id'] ?>" style="display:block; margin-bottom:6px; padding:10px 14px;">
+                                        <strong><?= e($a['title']) ?></strong>
+                                        <p class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">
+                                            <?= (int) $a['points'] ?> pts
+                                            <?php if ($a['due_date']): ?>
+                                                · Entrega: <?= e(date('d/m/Y', strtotime($a['due_date']))) ?>
+                                            <?php endif; ?>
+                                        </p>
+                                    </a>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+
+                            <h4 style="margin:14px 0 8px;">✅ Realizadas</h4>
+                            <?php if (empty($completed)): ?>
+                                <p class="empty-state" style="padding:8px 0; font-size:0.85rem;">Todavía no completaste ninguna en esta asignatura.</p>
+                            <?php else: ?>
+                                <?php foreach ($completed as $a): ?>
+                                    <a class="card" href="assignment.php?id=<?= (int) $a['id'] ?>" style="display:block; margin-bottom:6px; padding:10px 14px;">
+                                        <strong><?= e($a['title']) ?></strong>
+                                    </a>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
                         </div>
-                    <?php endforeach; ?>
-                </div>
+                    </details>
+                <?php endforeach; ?>
             <?php endif; ?>
         </section>
     <?php endforeach; ?>
-<?php endif; ?>
-
-<?php if (!empty($assignments)): ?>
-<section class="card">
-    <h2 style="margin-top:0;">Historial de calificaciones</h2>
-    <?php $graded = array_filter($assignments, fn($a) => $a['status'] === 'completed'); ?>
-    <?php if (empty($graded)): ?>
-        <p class="empty-state">Todavía no tienes actividades completadas.</p>
-    <?php else: ?>
-        <?php foreach ($graded as $a): ?>
-            <a class="card" href="assignment.php?id=<?= (int) $a['id'] ?>" style="display:block; margin-bottom:8px; padding:10px 16px;">
-                <strong><?= e($a['title']) ?></strong> — <?= e($a['subject_name']) ?>
-            </a>
-        <?php endforeach; ?>
-    <?php endif; ?>
-</section>
 <?php endif; ?>
 <?php require __DIR__ . '/../includes/footer.php'; ?>

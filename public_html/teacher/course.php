@@ -53,6 +53,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if ($action === 'rename_course') {
+        $name = clean_string($_POST['course_name'] ?? '');
+        if ($name === '') {
+            $errors[] = 'El nombre del curso no puede estar vacío.';
+        } else {
+            $pdo->prepare('UPDATE courses SET name = :name WHERE id = :id')->execute(['name' => $name, 'id' => $courseId]);
+            $course['name'] = $name;
+            audit_log($pdo, $teacherId, 'rename_course', "Curso #{$courseId} renombrado a '{$name}'");
+            $notice = 'Curso renombrado.';
+        }
+    }
+
+    if ($action === 'rename_subject') {
+        $subjectId = (int) ($_POST['subject_id'] ?? 0);
+        $name = clean_string($_POST['subject_name_edit'] ?? '');
+        if ($name === '') {
+            $errors[] = 'El nombre de la asignatura no puede estar vacío.';
+        } else {
+            $pdo->prepare('UPDATE subjects SET name = :name WHERE id = :id AND course_id = :course_id')
+                ->execute(['name' => $name, 'id' => $subjectId, 'course_id' => $courseId]);
+            $notice = 'Asignatura renombrada.';
+        }
+    }
+
+    if ($action === 'delete_subject') {
+        $subjectId = (int) ($_POST['subject_id'] ?? 0);
+
+        $usedStmt = $pdo->prepare(
+            '(SELECT COUNT(*) FROM activities WHERE subject_id = :sid1)
+             + (SELECT COUNT(*) FROM quizzes WHERE subject_id = :sid2)
+             + (SELECT COUNT(*) FROM assignments WHERE subject_id = :sid3) AS total'
+        );
+        $usedStmt->execute(['sid1' => $subjectId, 'sid2' => $subjectId, 'sid3' => $subjectId]);
+        $inUse = (int) ($usedStmt->fetch()['total'] ?? 0);
+
+        if ($inUse > 0) {
+            $errors[] = 'No se puede eliminar: esta asignatura ya tiene actividades, cuestionarios o asignaciones. Puedes renombrarla en su lugar.';
+        } else {
+            $pdo->prepare('DELETE FROM subjects WHERE id = :id AND course_id = :course_id')
+                ->execute(['id' => $subjectId, 'course_id' => $courseId]);
+            $notice = 'Asignatura eliminada.';
+        }
+    }
+
+    if ($action === 'unenroll_student') {
+        $studentId = (int) ($_POST['student_id'] ?? 0);
+        course_unenroll_student($pdo, $courseId, $studentId);
+        audit_log($pdo, $teacherId, 'unenroll_student', "Estudiante #{$studentId} sacado del curso #{$courseId}");
+        $notice = 'Estudiante quitado del curso (y de todas sus asignaturas). Su historial de calificaciones se conserva.';
+    }
+
     if ($action === 'enroll_student') {
         $email = clean_string($_POST['student_email'] ?? '');
         $stmtS = $pdo->prepare("SELECT u.id FROM users u WHERE u.email = :email AND u.role = 'student' LIMIT 1");
@@ -131,6 +182,16 @@ require __DIR__ . '/../includes/header.php';
 <p><a href="dashboard.php">&larr; Volver a mis cursos</a></p>
 <h1><?= e($course['name']) ?></h1>
 
+<details style="margin-bottom:16px;">
+    <summary style="cursor:pointer; color:var(--color-primary);">✏️ Renombrar curso</summary>
+    <form method="post" action="course.php?id=<?= (int) $courseId ?>" style="max-width:420px; margin-top:10px;">
+        <?php csrf_field(); ?>
+        <input type="hidden" name="action" value="rename_course">
+        <input type="text" name="course_name" value="<?= e($course['name']) ?>" required>
+        <button type="submit" class="btn btn-secondary" style="margin-top:8px;">Guardar nombre</button>
+    </form>
+</details>
+
 <?php foreach ($errors as $error): ?>
     <div class="alert alert-error"><?= e($error) ?></div>
 <?php endforeach; ?>
@@ -169,9 +230,29 @@ require __DIR__ . '/../includes/header.php';
         <?php if (empty($subjects)): ?>
             <p class="empty-state">Sin asignaturas todavía.</p>
         <?php else: ?>
-            <ul>
+            <ul style="list-style:none; padding:0; margin:0;">
                 <?php foreach ($subjects as $s): ?>
-                    <li><?= e($s['name']) ?></li>
+                    <li style="padding:8px 0; border-bottom:1px solid var(--color-border);">
+                        <details>
+                            <summary style="cursor:pointer;"><?= e($s['name']) ?></summary>
+                            <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                                <form method="post" action="course.php?id=<?= (int) $courseId ?>" style="display:flex; gap:6px;">
+                                    <?php csrf_field(); ?>
+                                    <input type="hidden" name="action" value="rename_subject">
+                                    <input type="hidden" name="subject_id" value="<?= (int) $s['id'] ?>">
+                                    <input type="text" name="subject_name_edit" value="<?= e($s['name']) ?>" style="padding:4px 8px; font-size:0.85rem;">
+                                    <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem;">Renombrar</button>
+                                </form>
+                                <form method="post" action="course.php?id=<?= (int) $courseId ?>"
+                                      onsubmit="return confirm('¿Eliminar la asignatura <?= e(addslashes($s['name'])) ?>? Solo se puede si no tiene actividades, cuestionarios ni asignaciones.')">
+                                    <?php csrf_field(); ?>
+                                    <input type="hidden" name="action" value="delete_subject">
+                                    <input type="hidden" name="subject_id" value="<?= (int) $s['id'] ?>">
+                                    <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem; color:#C0392B; border-color:#C0392B;">Eliminar</button>
+                                </form>
+                            </div>
+                        </details>
+                    </li>
                 <?php endforeach; ?>
             </ul>
         <?php endif; ?>
@@ -194,15 +275,26 @@ require __DIR__ . '/../includes/header.php';
                 <?php foreach ($students as $st): ?>
                     <li style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--color-border);">
                         <span><?= e($st['name']) ?> <span class="text-muted">(<?= e($st['email']) ?>)</span></span>
-                        <form method="post" action="course.php?id=<?= (int) $courseId ?>"
-                              onsubmit="return confirm('¿Restablecer la contraseña de <?= e(addslashes($st['name'])) ?>? Se generará una nueva contraseña temporal.')">
-                            <?php csrf_field(); ?>
-                            <input type="hidden" name="action" value="reset_student_password">
-                            <input type="hidden" name="student_id" value="<?= (int) $st['id'] ?>">
-                            <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem; white-space:nowrap;">
-                                Restablecer contraseña
-                            </button>
-                        </form>
+                        <span style="display:flex; gap:6px; flex-wrap:wrap;">
+                            <form method="post" action="course.php?id=<?= (int) $courseId ?>"
+                                  onsubmit="return confirm('¿Restablecer la contraseña de <?= e(addslashes($st['name'])) ?>? Se generará una nueva contraseña temporal.')">
+                                <?php csrf_field(); ?>
+                                <input type="hidden" name="action" value="reset_student_password">
+                                <input type="hidden" name="student_id" value="<?= (int) $st['id'] ?>">
+                                <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem; white-space:nowrap;">
+                                    Restablecer contraseña
+                                </button>
+                            </form>
+                            <form method="post" action="course.php?id=<?= (int) $courseId ?>"
+                                  onsubmit="return confirm('¿Quitar a <?= e(addslashes($st['name'])) ?> de este curso? Se eliminarán sus tareas pendientes de este curso (se conserva lo ya calificado).')">
+                                <?php csrf_field(); ?>
+                                <input type="hidden" name="action" value="unenroll_student">
+                                <input type="hidden" name="student_id" value="<?= (int) $st['id'] ?>">
+                                <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem; white-space:nowrap; color:#C0392B; border-color:#C0392B;">
+                                    Quitar del curso
+                                </button>
+                            </form>
+                        </span>
                     </li>
                 <?php endforeach; ?>
             </ul>
