@@ -31,17 +31,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $timeLimitRaw = trim($_POST['time_limit_minutes'] ?? '');
         $timeLimit = $timeLimitRaw === '' ? null : max(1, (int) $timeLimitRaw);
         $maxAttempts = max(1, (int) ($_POST['max_attempts'] ?? 1));
+        $questionsPerAttemptRaw = trim($_POST['questions_per_attempt'] ?? '');
+        $questionsPerAttempt = $questionsPerAttemptRaw === '' ? null : max(1, (int) $questionsPerAttemptRaw);
 
         if ($title === '') {
             $errors[] = 'El título no puede estar vacío.';
         } else {
             $pdo->prepare(
                 'UPDATE quizzes SET title = :title, description = :description, instructions = :instructions,
-                    time_limit_minutes = :time_limit_minutes, max_attempts = :max_attempts, updated_at = :updated_at
+                    time_limit_minutes = :time_limit_minutes, max_attempts = :max_attempts,
+                    questions_per_attempt = :questions_per_attempt, updated_at = :updated_at
                  WHERE id = :id AND teacher_id = :teacher_id'
             )->execute([
                 'title' => $title, 'description' => $description, 'instructions' => $instructions,
                 'time_limit_minutes' => $timeLimit, 'max_attempts' => $maxAttempts,
+                'questions_per_attempt' => $questionsPerAttempt,
                 'updated_at' => now_datetime(), 'id' => $quizId, 'teacher_id' => $teacherId,
             ]);
             $notice = 'Datos guardados.';
@@ -242,6 +246,14 @@ require __DIR__ . '/../includes/header.php';
             <input type="text" id="max_attempts" name="max_attempts" value="<?= (int) $quiz['max_attempts'] ?>">
             <p class="text-muted" style="font-size:0.8rem; margin-top:-8px;">
                 Si permites más de uno, se guarda la mejor calificación obtenida entre todos los intentos.
+            </p>
+
+            <label for="questions_per_attempt">Preguntas al azar por intento (vacío = todas)</label>
+            <input type="text" id="questions_per_attempt" name="questions_per_attempt"
+                   value="<?= $quiz['questions_per_attempt'] !== null ? (int) $quiz['questions_per_attempt'] : '' ?>" placeholder="Todas las del banco">
+            <p class="text-muted" style="font-size:0.8rem; margin-top:-8px;">
+                Ej: si subís 20 preguntas y ponés 10 acá, cada estudiante responde 10 al azar de esas 20 —
+                así les toca un subconjunto distinto a cada uno. El orden también se mezcla siempre.
             </p>
 
             <button type="submit" class="btn">Guardar datos</button>

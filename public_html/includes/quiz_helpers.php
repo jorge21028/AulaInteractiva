@@ -73,10 +73,57 @@ function quiz_start_or_resume_attempt(PDO $pdo, array $quiz, int $studentId, ?in
     ]);
     $attemptId = (int) $pdo->lastInsertId();
 
+    quiz_snapshot_questions_for_attempt($pdo, $attemptId, $quizId, $quiz['questions_per_attempt'] ?? null);
+
     $getStmt = $pdo->prepare('SELECT * FROM quiz_attempts WHERE id = :id');
     $getStmt->execute(['id' => $attemptId]);
 
     return ['attempt' => $getStmt->fetch(), 'error' => null];
+}
+
+/**
+ * Elige qué preguntas le tocan a un intento nuevo y las "congela" en
+ * quiz_attempt_questions, para que el subconjunto al azar no cambie durante
+ * el intento aunque el profesor edite el banco de preguntas después.
+ * Si $questionsPerAttempt es NULL, 0, o mayor o igual al total del banco,
+ * se incluyen TODAS las preguntas (mismo comportamiento que antes de esta
+ * función existir), simplemente en orden aleatorio.
+ */
+function quiz_snapshot_questions_for_attempt(PDO $pdo, int $attemptId, int $quizId, ?int $questionsPerAttempt): void
+{
+    $idsStmt = $pdo->prepare('SELECT id FROM quiz_questions WHERE quiz_id = :quiz_id');
+    $idsStmt->execute(['quiz_id' => $quizId]);
+    $ids = array_column($idsStmt->fetchAll(), 'id');
+
+    if (empty($ids)) {
+        return;
+    }
+
+    shuffle($ids);
+
+    if ($questionsPerAttempt !== null && $questionsPerAttempt > 0 && $questionsPerAttempt < count($ids)) {
+        $ids = array_slice($ids, 0, $questionsPerAttempt);
+    }
+
+    $insert = $pdo->prepare(
+        'INSERT INTO quiz_attempt_questions (attempt_id, question_id, order_index) VALUES (:attempt_id, :question_id, :order_index)'
+    );
+    foreach ($ids as $orderIndex => $questionId) {
+        $insert->execute(['attempt_id' => $attemptId, 'question_id' => $questionId, 'order_index' => $orderIndex]);
+    }
+}
+
+/**
+ * Registra que el estudiante cambió de pestaña / minimizó / salió de
+ * pantalla completa durante un intento en curso. Se ignora silenciosamente
+ * si el intento no existe, no es de ese estudiante, o ya fue entregado.
+ */
+function quiz_record_tab_switch(PDO $pdo, int $attemptId, int $studentId): void
+{
+    $pdo->prepare(
+        "UPDATE quiz_attempts SET tab_switches = tab_switches + 1
+         WHERE id = :id AND student_id = :student_id AND status = 'in_progress'"
+    )->execute(['id' => $attemptId, 'student_id' => $studentId]);
 }
 
 /**
@@ -94,8 +141,14 @@ function quiz_submit_attempt(PDO $pdo, int $attemptId, array $answers): array
         return $attempt ?: [];
     }
 
-    $qStmt = $pdo->prepare('SELECT * FROM quiz_questions WHERE quiz_id = :quiz_id ORDER BY order_index ASC');
-    $qStmt->execute(['quiz_id' => $attempt['quiz_id']]);
+    // Solo se califica con las preguntas que efectivamente le tocaron a ESTE
+    // intento (el subconjunto al azar congelado al empezar), no todo el banco.
+    $qStmt = $pdo->prepare(
+        'SELECT qq.* FROM quiz_attempt_questions qaq
+         INNER JOIN quiz_questions qq ON qq.id = qaq.question_id
+         WHERE qaq.attempt_id = :attempt_id ORDER BY qaq.order_index ASC'
+    );
+    $qStmt->execute(['attempt_id' => $attemptId]);
     $questions = $qStmt->fetchAll();
 
     $optStmt = $pdo->prepare('SELECT * FROM quiz_options WHERE question_id = :qid');
@@ -206,13 +259,19 @@ function quiz_sync_submission(PDO $pdo, int $quizId, int $studentId, int $attemp
 }
 
 /**
- * Devuelve las preguntas del cuestionario con sus opciones (sin revelar
- * cuál es la correcta), listas para mostrarle al estudiante durante el intento.
+ * Devuelve las preguntas que le tocaron a ESTE intento (el subconjunto al
+ * azar ya congelado), con sus opciones (sin revelar cuál es la correcta),
+ * listas para mostrarle al estudiante mientras responde.
  */
-function quiz_questions_for_attempt(PDO $pdo, int $quizId): array
+function quiz_questions_for_attempt(PDO $pdo, int $attemptId): array
 {
-    $qStmt = $pdo->prepare('SELECT id, type, statement, points FROM quiz_questions WHERE quiz_id = :quiz_id ORDER BY order_index ASC');
-    $qStmt->execute(['quiz_id' => $quizId]);
+    $qStmt = $pdo->prepare(
+        'SELECT qq.id, qq.type, qq.statement, qq.points
+         FROM quiz_attempt_questions qaq
+         INNER JOIN quiz_questions qq ON qq.id = qaq.question_id
+         WHERE qaq.attempt_id = :attempt_id ORDER BY qaq.order_index ASC'
+    );
+    $qStmt->execute(['attempt_id' => $attemptId]);
     $questions = $qStmt->fetchAll();
 
     $optStmt = $pdo->prepare('SELECT id, text FROM quiz_options WHERE question_id = :qid ORDER BY order_index ASC');
@@ -258,12 +317,13 @@ function quiz_attempt_review(PDO $pdo, int $attemptId): array
 {
     $qStmt = $pdo->prepare(
         'SELECT qq.id, qq.type, qq.statement, qq.points, qaa.selected_option_id, qaa.is_correct, qaa.points_earned
-         FROM quiz_questions qq
-         LEFT JOIN quiz_attempt_answers qaa ON qaa.question_id = qq.id AND qaa.attempt_id = :attempt_id
-         WHERE qq.quiz_id = (SELECT quiz_id FROM quiz_attempts WHERE id = :attempt_id2)
-         ORDER BY qq.order_index ASC'
+         FROM quiz_attempt_questions qaq
+         INNER JOIN quiz_questions qq ON qq.id = qaq.question_id
+         LEFT JOIN quiz_attempt_answers qaa ON qaa.question_id = qq.id AND qaa.attempt_id = qaq.attempt_id
+         WHERE qaq.attempt_id = :attempt_id
+         ORDER BY qaq.order_index ASC'
     );
-    $qStmt->execute(['attempt_id' => $attemptId, 'attempt_id2' => $attemptId]);
+    $qStmt->execute(['attempt_id' => $attemptId]);
     $questions = $qStmt->fetchAll();
 
     $optStmt = $pdo->prepare('SELECT id, text, is_correct FROM quiz_options WHERE question_id = :qid ORDER BY order_index ASC');

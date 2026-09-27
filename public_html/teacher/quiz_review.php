@@ -48,6 +48,13 @@ require __DIR__ . '/../includes/header.php';
         <p class="text-muted" style="font-size:0.85rem;">
             Entregado el <?= e(date('d/m/Y H:i', strtotime($attempt['submitted_at']))) ?>
         </p>
+        <?php if ((int) $attempt['tab_switches'] > 0): ?>
+            <p style="color:#C0392B; font-weight:600;">
+                🚩 Cambió de pestaña o salió de pantalla completa <?= (int) $attempt['tab_switches'] ?> vez(veces) durante este intento.
+            </p>
+        <?php else: ?>
+            <p class="text-muted" style="font-size:0.85rem;">Sin cambios de pestaña detectados durante el intento.</p>
+        <?php endif; ?>
     </div>
 
     <section class="card" style="margin-top:16px;">

@@ -13,7 +13,7 @@ $assignmentId = (int) ($_GET['assignment_id'] ?? 0);
 $stmt = $pdo->prepare(
     "SELECT a.id AS assignment_id, a.due_date, a.points AS assignment_points, a.quiz_id AS assignment_quiz_id,
         qz.id AS quiz_id, qz.title, qz.description, qz.instructions,
-        qz.time_limit_minutes, qz.max_attempts, qz.status
+        qz.time_limit_minutes, qz.max_attempts, qz.questions_per_attempt, qz.status
      FROM assignments a
      INNER JOIN quizzes qz ON qz.id = a.quiz_id
      INNER JOIN assignment_students ast ON ast.assignment_id = a.id AND ast.student_id = :student_id
@@ -34,6 +34,7 @@ $quiz = [
     'instructions' => $row['instructions'],
     'time_limit_minutes' => $row['time_limit_minutes'],
     'max_attempts' => (int) $row['max_attempts'],
+    'questions_per_attempt' => $row['questions_per_attempt'] !== null ? (int) $row['questions_per_attempt'] : null,
 ];
 
 $isOverdue = $row['due_date'] && strtotime($row['due_date']) < time();
@@ -109,6 +110,7 @@ if (!$submittedAttempt && !$reviewOnly) {
     } else {
         $result = quiz_start_or_resume_attempt($pdo, [
             'id' => $quiz['id'], 'max_attempts' => $quiz['max_attempts'], 'time_limit_minutes' => $quiz['time_limit_minutes'],
+            'questions_per_attempt' => $quiz['questions_per_attempt'],
         ], $studentId, $assignmentId);
 
         if ($result['error']) {
@@ -141,7 +143,7 @@ if (!$submittedAttempt && !$reviewOnly) {
     }
 }
 
-$questions = $activeAttempt ? quiz_questions_for_attempt($pdo, $quiz['id']) : [];
+$questions = $activeAttempt ? quiz_questions_for_attempt($pdo, (int) $activeAttempt['id']) : [];
 $review = $submittedAttempt ? quiz_attempt_review($pdo, (int) $submittedAttempt['id']) : [];
 
 $pageTitle = $quiz['title'];
@@ -219,36 +221,110 @@ require __DIR__ . '/../includes/header.php';
         <div class="card" style="background:#F8FAFC;"><strong>Instrucciones:</strong> <?= nl2br(e($quiz['instructions'])) ?></div>
     <?php endif; ?>
 
-    <p class="text-muted" style="font-size:0.85rem;">
-        Intento <?= (int) $activeAttempt['attempt_number'] ?> de <?= (int) $quiz['max_attempts'] ?>
-        <?php if ($activeAttempt['expires_at']): ?>
-            · Tiempo restante: <strong id="quiz-timer"></strong>
-        <?php endif; ?>
-    </p>
+    <div id="quiz-gate" class="card" style="text-align:center;">
+        <h2 style="margin-top:0;">🔒 Este cuestionario se realiza en pantalla completa</h2>
+        <p class="text-muted">
+            Al hacer clic en "Comenzar" se activará la pantalla completa. Si cambias de pestaña, minimizas la
+            ventana, o sales de pantalla completa mientras respondés, quedará registrado para tu profesor.
+        </p>
+        <button type="button" class="btn" id="btn-start-fullscreen">Comenzar cuestionario</button>
+    </div>
 
-    <form method="post" action="quiz_attempt.php?assignment_id=<?= (int) $assignmentId ?>" id="quiz-form"
-          onsubmit="return confirm('¿Entregar el cuestionario? No podrás cambiar tus respuestas después.')">
-        <?php csrf_field(); ?>
-        <input type="hidden" name="action" value="submit_attempt">
-        <input type="hidden" name="attempt_id" value="<?= (int) $activeAttempt['id'] ?>">
+    <div id="quiz-content" style="display:none;">
+        <p class="text-muted" style="font-size:0.85rem;">
+            Intento <?= (int) $activeAttempt['attempt_number'] ?> de <?= (int) $quiz['max_attempts'] ?>
+            <?php if ($activeAttempt['expires_at']): ?>
+                · Tiempo restante: <strong id="quiz-timer"></strong>
+            <?php endif; ?>
+        </p>
 
-        <?php foreach ($questions as $i => $q): ?>
-            <div class="card" style="margin-bottom:12px;">
-                <strong><?= $i + 1 ?>. <?= e($q['statement']) ?></strong>
-                <span class="text-muted" style="font-size:0.85rem;"> (<?= (int) $q['points'] ?> pts)</span>
-                <div style="margin-top:10px;">
-                    <?php foreach ($q['options'] as $o): ?>
-                        <label style="display:flex; align-items:center; gap:8px; font-weight:400; padding:6px 0;">
-                            <input type="radio" name="answers[<?= (int) $q['id'] ?>]" value="<?= (int) $o['id'] ?>" style="width:auto;">
-                            <?= e($o['text']) ?>
-                        </label>
-                    <?php endforeach; ?>
+        <form method="post" action="quiz_attempt.php?assignment_id=<?= (int) $assignmentId ?>" id="quiz-form"
+              onsubmit="return confirm('¿Entregar el cuestionario? No podrás cambiar tus respuestas después.')">
+            <?php csrf_field(); ?>
+            <input type="hidden" name="action" value="submit_attempt">
+            <input type="hidden" name="attempt_id" value="<?= (int) $activeAttempt['id'] ?>">
+
+            <?php foreach ($questions as $i => $q): ?>
+                <div class="card" style="margin-bottom:12px;">
+                    <strong><?= $i + 1 ?>. <?= e($q['statement']) ?></strong>
+                    <span class="text-muted" style="font-size:0.85rem;"> (<?= (int) $q['points'] ?> pts)</span>
+                    <div style="margin-top:10px;">
+                        <?php foreach ($q['options'] as $o): ?>
+                            <label style="display:flex; align-items:center; gap:8px; font-weight:400; padding:6px 0;">
+                                <input type="radio" name="answers[<?= (int) $q['id'] ?>]" value="<?= (int) $o['id'] ?>" style="width:auto;">
+                                <?= e($o['text']) ?>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
                 </div>
-            </div>
-        <?php endforeach; ?>
+            <?php endforeach; ?>
 
-        <button type="submit" class="btn">Entregar cuestionario</button>
-    </form>
+            <button type="submit" class="btn">Entregar cuestionario</button>
+        </form>
+    </div>
+
+    <script>
+    (function () {
+        const attemptId = <?= (int) $activeAttempt['id'] ?>;
+        const csrfToken = <?= json_encode(csrf_token()) ?>;
+        const gate = document.getElementById('quiz-gate');
+        const content = document.getElementById('quiz-content');
+        const startBtn = document.getElementById('btn-start-fullscreen');
+        const quizForm = document.getElementById('quiz-form');
+
+        function reportViolation() {
+            fetch('<?= e(rtrim(APP_URL, '/')) ?>/api/quiz/report_violation.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                keepalive: true,
+                body: JSON.stringify({ attempt_id: attemptId, csrf_token: csrfToken }),
+            }).catch(() => {});
+        }
+
+        // Evita contar varias veces el mismo evento (algunos navegadores
+        // disparan visibilitychange y blur casi juntos para la misma acción).
+        let lastReportAt = 0;
+        function reportOnce() {
+            const now = Date.now();
+            if (now - lastReportAt > 1500) {
+                lastReportAt = now;
+                reportViolation();
+            }
+        }
+
+        function beginMonitoring() {
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) reportOnce();
+            });
+            document.addEventListener('fullscreenchange', () => {
+                if (!document.fullscreenElement) reportOnce();
+            });
+            window.addEventListener('blur', reportOnce);
+        }
+
+        startBtn.addEventListener('click', () => {
+            const el = document.documentElement;
+            const request = el.requestFullscreen ? el.requestFullscreen()
+                : el.webkitRequestFullscreen ? el.webkitRequestFullscreen()
+                : Promise.reject(new Error('Pantalla completa no disponible en este navegador.'));
+
+            Promise.resolve(request).catch(() => {
+                // Si el navegador no lo permite (ej: algunos navegadores de iOS),
+                // igual dejamos continuar con el cuestionario en lugar de bloquearlo.
+            }).finally(() => {
+                gate.style.display = 'none';
+                content.style.display = 'block';
+                beginMonitoring();
+            });
+        });
+
+        quizForm.addEventListener('submit', () => {
+            if (document.fullscreenElement && document.exitFullscreen) {
+                document.exitFullscreen().catch(() => {});
+            }
+        });
+    })();
+    </script>
 
     <?php if ($activeAttempt['expires_at']): ?>
     <script>

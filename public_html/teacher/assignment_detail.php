@@ -54,9 +54,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 
 $rosterStmt = $pdo->prepare(
     'SELECT sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id, sub.quiz_attempt_id,
+        qa.tab_switches,
         u.name AS student_name, u.email AS student_email
      FROM submissions sub
      INNER JOIN users u ON u.id = sub.student_id
+     LEFT JOIN quiz_attempts qa ON qa.id = sub.quiz_attempt_id
      WHERE sub.assignment_id = :assignment_id
      ORDER BY u.name ASC'
 );
@@ -127,6 +129,11 @@ require __DIR__ . '/../includes/header.php';
                         <?php endif; ?>
                         <?php if ($r['quiz_attempt_id']): ?>
                             <a href="quiz_review.php?id=<?= (int) $r['quiz_attempt_id'] ?>" style="font-size:0.85rem;">Ver intento &rarr;</a>
+                            <?php if ((int) $r['tab_switches'] > 0): ?>
+                                <span style="color:#C0392B; font-weight:600; font-size:0.8rem;">
+                                    🚩 <?= (int) $r['tab_switches'] ?> cambio<?= (int) $r['tab_switches'] === 1 ? '' : 's' ?> de pestaña
+                                </span>
+                            <?php endif; ?>
                         <?php endif; ?>
                     </div>
                 </div>
