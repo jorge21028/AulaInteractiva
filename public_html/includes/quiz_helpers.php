@@ -126,6 +126,85 @@ function quiz_record_tab_switch(PDO $pdo, int $attemptId, int $studentId): void
     )->execute(['id' => $attemptId, 'student_id' => $studentId]);
 }
 
+/** Máximo de strikes por intento: al llegar a este número el intento se cierra y se entrega. */
+const QUIZ_MAX_STRIKES = 3;
+/** Descuento de tiempo (porcentaje del tiempo ESTABLECIDO del cuestionario) por cada strike. */
+const QUIZ_STRIKE_PENALTY_PERCENT = [1 => 10, 2 => 20];
+/** Segundos de gracia para que el navegador envíe las respuestas tras el tercer strike. */
+const QUIZ_CLOSE_GRACE_SECONDS = 30;
+
+/**
+ * Registra un strike (salida de la pantalla del cuestionario) y aplica su consecuencia:
+ *   strike 1 -> descuenta 10 % del tiempo establecido del cuestionario
+ *   strike 2 -> descuenta 20 % del tiempo establecido
+ *   strike 3 -> el intento se cierra (el navegador envía lo respondido)
+ * Usa tab_switches como contador de strikes, así el profesor sigue viendo el mismo dato.
+ * El descuento se aplica adelantando expires_at, por lo que el servidor es la autoridad
+ * del tiempo aunque el estudiante manipule el navegador.
+ *
+ * Devuelve ['active' => false] si el intento no existe, no es del estudiante o ya se entregó.
+ */
+function quiz_register_strike(PDO $pdo, int $attemptId, int $studentId): array
+{
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT qa.id, qa.tab_switches, qa.expires_at, qz.time_limit_minutes
+             FROM quiz_attempts qa INNER JOIN quizzes qz ON qz.id = qa.quiz_id
+             WHERE qa.id = :id AND qa.student_id = :student_id AND qa.status = 'in_progress'
+             FOR UPDATE"
+        );
+        $stmt->execute(['id' => $attemptId, 'student_id' => $studentId]);
+        $attempt = $stmt->fetch();
+
+        if (!$attempt) {
+            $pdo->rollBack();
+            return ['active' => false];
+        }
+
+        $strike = (int) $attempt['tab_switches'] + 1;
+        $limitSeconds = !empty($attempt['time_limit_minutes']) ? (int) $attempt['time_limit_minutes'] * 60 : 0;
+        $hasTimeLimit = $attempt['expires_at'] !== null && $limitSeconds > 0;
+        $closed = $strike >= QUIZ_MAX_STRIKES;
+
+        $percent = $closed ? 0 : (QUIZ_STRIKE_PENALTY_PERCENT[$strike] ?? 0);
+        $penaltySeconds = 0;
+        $newExpires = $attempt['expires_at'];
+
+        if ($closed) {
+            // Se cierra: margen corto para que el navegador envíe las respuestas; si no lo hace,
+            // al vencer se autoentrega con lo guardado.
+            $graceEnd = time() + QUIZ_CLOSE_GRACE_SECONDS;
+            $current = $attempt['expires_at'] !== null ? strtotime($attempt['expires_at']) : PHP_INT_MAX;
+            $newExpires = date('Y-m-d H:i:s', min($graceEnd, $current));
+        } elseif ($hasTimeLimit && $percent > 0) {
+            $penaltySeconds = (int) round($limitSeconds * $percent / 100);
+            $newExpires = date('Y-m-d H:i:s', strtotime($attempt['expires_at']) - $penaltySeconds);
+        }
+
+        $pdo->prepare('UPDATE quiz_attempts SET tab_switches = :strike, expires_at = :expires WHERE id = :id')
+            ->execute(['strike' => $strike, 'expires' => $newExpires, 'id' => $attemptId]);
+        $pdo->commit();
+
+        return [
+            'active'            => true,
+            'strike'            => $strike,
+            'max_strikes'       => QUIZ_MAX_STRIKES,
+            'strikes_left'      => max(0, QUIZ_MAX_STRIKES - $strike),
+            'closed'            => $closed,
+            'has_time_limit'    => $hasTimeLimit,
+            'penalty_percent'   => $percent,
+            'penalty_seconds'   => $penaltySeconds,
+            'remaining_seconds' => $newExpires !== null ? max(0, strtotime($newExpires) - time()) : null,
+        ];
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
 /**
  * Califica y cierra un intento. $answers es un array [question_id => option_id]
  * (puede venir incompleto: las preguntas sin responder cuentan como incorrectas).

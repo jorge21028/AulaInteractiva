@@ -225,9 +225,14 @@ require __DIR__ . '/../includes/header.php';
         <h2 style="margin-top:0;">🔒 Este cuestionario se realiza en pantalla completa</h2>
         <p class="text-muted">
             Al hacer clic en "Comenzar" se activará la pantalla completa. Si cambias de pestaña, minimizas la
-            ventana, o sales de pantalla completa mientras respondés, quedará registrado para tu profesor.
+            ventana o sales de pantalla completa mientras respondes, recibirás un <strong>strike</strong>:
         </p>
-        <button type="button" class="btn" id="btn-start-fullscreen">Comenzar cuestionario</button>
+        <ul style="text-align:left; display:inline-block; margin:0 0 12px;">
+            <li><strong>Strike 1:</strong> se descuenta el 10&nbsp;% del tiempo del cuestionario.</li>
+            <li><strong>Strike 2:</strong> se descuenta el 20&nbsp;% del tiempo del cuestionario.</li>
+            <li><strong>Strike 3:</strong> el cuestionario se cierra y se entrega con lo que hayas respondido.</li>
+        </ul>
+        <div><button type="button" class="btn" id="btn-start-fullscreen">Comenzar cuestionario</button></div>
     </div>
 
     <div id="quiz-content" style="display:none;">
@@ -236,10 +241,10 @@ require __DIR__ . '/../includes/header.php';
             <?php if ($activeAttempt['expires_at']): ?>
                 · Tiempo restante: <strong id="quiz-timer"></strong>
             <?php endif; ?>
+            · Strikes: <strong id="quiz-strikes"><?= (int) $activeAttempt['tab_switches'] ?>/<?= (int) QUIZ_MAX_STRIKES ?></strong>
         </p>
 
-        <form method="post" action="quiz_attempt.php?assignment_id=<?= (int) $assignmentId ?>" id="quiz-form"
-              onsubmit="return confirm('¿Entregar el cuestionario? No podrás cambiar tus respuestas después.')">
+        <form method="post" action="quiz_attempt.php?assignment_id=<?= (int) $assignmentId ?>" id="quiz-form">
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="submit_attempt">
             <input type="hidden" name="attempt_id" value="<?= (int) $activeAttempt['id'] ?>">
@@ -263,43 +268,213 @@ require __DIR__ . '/../includes/header.php';
         </form>
     </div>
 
+    <?php $remainingSeconds = $activeAttempt['expires_at'] ? max(0, strtotime($activeAttempt['expires_at']) - time()) : null; ?>
     <script>
     (function () {
         const attemptId = <?= (int) $activeAttempt['id'] ?>;
         const csrfToken = <?= json_encode(csrf_token()) ?>;
+        const reportUrl = '<?= e(rtrim(APP_URL, '/')) ?>/api/quiz/report_violation.php';
+        const MAX_STRIKES = <?= (int) QUIZ_MAX_STRIKES ?>;
         const gate = document.getElementById('quiz-gate');
         const content = document.getElementById('quiz-content');
         const startBtn = document.getElementById('btn-start-fullscreen');
         const quizForm = document.getElementById('quiz-form');
+        const timerEl = document.getElementById('quiz-timer');
+        const strikesEl = document.getElementById('quiz-strikes');
+
+        // El tiempo se maneja con segundos restantes que calcula el servidor (no depende
+        // de la zona horaria ni del reloj del dispositivo del estudiante).
+        let deadline = <?= $remainingSeconds !== null ? 'Date.now() + ' . (int) $remainingSeconds . ' * 1000' : 'null' ?>;
+        let closing = false;      // true cuando el cuestionario se está entregando: se detiene todo el monitoreo
+        let monitoring = false;
+        let inFlight = false;
+        let lastReportAt = 0;
+        let tickTimer = null;
+
+        // ---------- Ventana de aviso propia (NO usa alert/confirm nativos) ----------
+        // Los diálogos nativos pueden sacar al navegador de pantalla completa o quitarle el foco
+        // a la página, y eso se contaría como otra salida. Esta ventana vive dentro de la página.
+        let modalEl = null;
+        function closeModal() {
+            if (modalEl) { modalEl.remove(); modalEl = null; }
+        }
+        function showModal({ icon, title, lines, color, buttons }) {
+            closeModal();
+            modalEl = document.createElement('div');
+            modalEl.setAttribute('role', 'alertdialog');
+            modalEl.setAttribute('aria-modal', 'true');
+            modalEl.style.cssText = 'position:fixed; inset:0; z-index:99999; background:rgba(15,23,42,0.75); display:flex; align-items:center; justify-content:center; padding:16px;';
+            const box = document.createElement('div');
+            box.style.cssText = 'background:#fff; border-radius:14px; max-width:480px; width:100%; padding:24px; text-align:center; border-top:6px solid ' + color + '; box-shadow:0 20px 60px rgba(0,0,0,0.4);';
+            const h = document.createElement('h2');
+            h.style.cssText = 'margin:0 0 12px; color:' + color + ';';
+            h.textContent = icon + ' ' + title;
+            box.appendChild(h);
+            lines.forEach(t => {
+                const p = document.createElement('p');
+                p.style.cssText = 'margin:8px 0; font-size:1rem;';
+                p.innerHTML = t; // solo texto controlado por este script
+                box.appendChild(p);
+            });
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:16px;';
+            buttons.forEach(b => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = b.secondary ? 'btn btn-secondary' : 'btn';
+                btn.style.margin = '0';
+                btn.textContent = b.label;
+                btn.addEventListener('click', b.onClick);
+                row.appendChild(btn);
+            });
+            box.appendChild(row);
+            modalEl.appendChild(box);
+            document.body.appendChild(modalEl);
+            const first = row.querySelector('button:last-child');
+            if (first) first.focus();
+        }
+
+        function fmt(seconds) {
+            const m = Math.floor(seconds / 60), s = seconds % 60;
+            if (m > 0 && s > 0) return m + ' min ' + s + ' s';
+            if (m > 0) return m + ' min';
+            return s + ' s';
+        }
+
+        // ---------- Entrega ----------
+        function submitNow() {
+            if (closing && quizForm.dataset.sending === '1') return;
+            closing = true; // detiene el monitoreo ANTES de salir de pantalla completa
+            quizForm.dataset.sending = '1';
+            if (document.fullscreenElement && document.exitFullscreen) {
+                document.exitFullscreen().catch(() => {});
+            }
+            quizForm.submit(); // submit() programático: no dispara el evento 'submit' ni pide confirmación
+        }
+
+        quizForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (closing) return;
+            const total = quizForm.querySelectorAll('.card').length;
+            const answered = new Set(Array.from(quizForm.querySelectorAll('input[type=radio]:checked')).map(r => r.name)).size;
+            const missing = total - answered;
+            showModal({
+                icon: '📝', title: '¿Entregar el cuestionario?', color: '#4F46E5',
+                lines: [
+                    missing > 0 ? 'Tienes <strong>' + missing + '</strong> pregunta(s) sin responder.' : 'Respondiste todas las preguntas.',
+                    'No podrás cambiar tus respuestas después.',
+                ],
+                buttons: [
+                    { label: 'Seguir respondiendo', secondary: true, onClick: closeModal },
+                    { label: 'Sí, entregar', onClick: submitNow },
+                ],
+            });
+        });
+
+        // ---------- Temporizador ----------
+        function tick() {
+            if (closing || deadline === null) return;
+            const diffMs = deadline - Date.now();
+            if (diffMs <= 0) {
+                if (timerEl) timerEl.textContent = '00:00';
+                closing = true;
+                showModal({
+                    icon: '⏰', title: 'Se acabó el tiempo', color: '#C0392B',
+                    lines: ['El cuestionario se entregará automáticamente con lo que hayas respondido.'],
+                    buttons: [{ label: 'Entregar ahora', onClick: () => { closing = false; submitNow(); } }],
+                });
+                setTimeout(() => { closing = false; submitNow(); }, 2500);
+                return;
+            }
+            const totalSeconds = Math.floor(diffMs / 1000);
+            const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+            const s = (totalSeconds % 60).toString().padStart(2, '0');
+            if (timerEl) timerEl.textContent = m + ':' + s;
+            tickTimer = setTimeout(tick, 1000);
+        }
+        tick();
+
+        // ---------- Strikes ----------
+        function handleStrike(data) {
+            if (strikesEl) strikesEl.textContent = data.strike + '/' + data.max_strikes;
+            if (data.remaining_seconds !== null && data.remaining_seconds !== undefined) {
+                deadline = Date.now() + data.remaining_seconds * 1000;
+                if (tickTimer) clearTimeout(tickTimer);
+                tick();
+            }
+
+            if (data.closed) {
+                closing = true; // ya no se cuentan más eventos
+                if (tickTimer) clearTimeout(tickTimer);
+                showModal({
+                    icon: '⛔', title: 'Strike ' + data.strike + ' de ' + data.max_strikes, color: '#C0392B',
+                    lines: [
+                        'Saliste de la pantalla del cuestionario por tercera vez.',
+                        '<strong>Consecuencia:</strong> el cuestionario se cierra y se entrega con lo que tenías respondido.',
+                        'Se enviará automáticamente en unos segundos...',
+                    ],
+                    buttons: [{ label: 'Entregar ahora', onClick: () => { closing = false; submitNow(); } }],
+                });
+                setTimeout(() => { closing = false; submitNow(); }, 5000);
+                return;
+            }
+
+            const left = data.strikes_left;
+            const lines = ['Saliste de la pantalla del cuestionario.'];
+            if (data.has_time_limit && data.penalty_seconds > 0) {
+                lines.push('<strong>Consecuencia:</strong> se descontó el ' + data.penalty_percent + '&nbsp;% del tiempo del cuestionario (' + fmt(data.penalty_seconds) + ').');
+                lines.push('Tiempo restante ahora: <strong>' + fmt(data.remaining_seconds) + '</strong>.');
+            } else {
+                lines.push('<strong>Consecuencia:</strong> advertencia (este cuestionario no tiene límite de tiempo que descontar).');
+            }
+            lines.push('Te ' + (left === 1 ? 'queda <strong>1 strike</strong>' : 'quedan <strong>' + left + ' strikes</strong>') + '.');
+            lines.push(data.strike === 1
+                ? 'En el strike 2 se descuenta el 20&nbsp;% del tiempo y en el strike 3 el cuestionario se cierra y se entrega.'
+                : 'Un strike más y el cuestionario se cierra y se entrega con lo que tengas respondido.');
+
+            showModal({
+                icon: '⚠️', title: 'Strike ' + data.strike + ' de ' + data.max_strikes,
+                color: data.strike === 1 ? '#D97706' : '#C0392B', lines,
+                buttons: [{
+                    label: 'Entendido, continuar',
+                    onClick: () => {
+                        closeModal();
+                        // Si salió de pantalla completa, este clic (gesto del usuario) la reactiva.
+                        if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+                            document.documentElement.requestFullscreen().catch(() => {});
+                        }
+                    },
+                }],
+            });
+        }
 
         function reportViolation() {
-            fetch('<?= e(rtrim(APP_URL, '/')) ?>/api/quiz/report_violation.php', {
+            if (closing || inFlight) return;
+            const now = Date.now();
+            if (now - lastReportAt < 1500) return; // un mismo gesto puede disparar varios eventos
+            lastReportAt = now;
+            inFlight = true;
+            fetch(reportUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 keepalive: true,
                 body: JSON.stringify({ attempt_id: attemptId, csrf_token: csrfToken }),
-            }).catch(() => {});
-        }
-
-        // Evita contar varias veces el mismo evento (algunos navegadores
-        // disparan visibilitychange y blur casi juntos para la misma acción).
-        let lastReportAt = 0;
-        function reportOnce() {
-            const now = Date.now();
-            if (now - lastReportAt > 1500) {
-                lastReportAt = now;
-                reportViolation();
-            }
+            })
+                .then(r => r.json())
+                .then(data => {
+                    inFlight = false;
+                    if (closing) return; // ya se está entregando
+                    if (data && data.success && data.active !== false) handleStrike(data);
+                })
+                .catch(() => { inFlight = false; });
         }
 
         function beginMonitoring() {
-            document.addEventListener('visibilitychange', () => {
-                if (document.hidden) reportOnce();
-            });
-            document.addEventListener('fullscreenchange', () => {
-                if (!document.fullscreenElement) reportOnce();
-            });
-            window.addEventListener('blur', reportOnce);
+            if (monitoring) return;
+            monitoring = true;
+            document.addEventListener('visibilitychange', () => { if (document.hidden) reportViolation(); });
+            document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) reportViolation(); });
+            window.addEventListener('blur', reportViolation);
         }
 
         startBtn.addEventListener('click', () => {
@@ -314,40 +489,12 @@ require __DIR__ . '/../includes/header.php';
             }).finally(() => {
                 gate.style.display = 'none';
                 content.style.display = 'block';
-                beginMonitoring();
+                // Pequeña pausa: el propio cambio a pantalla completa puede disparar un 'blur' inicial.
+                setTimeout(beginMonitoring, 800);
             });
-        });
-
-        quizForm.addEventListener('submit', () => {
-            if (document.fullscreenElement && document.exitFullscreen) {
-                document.exitFullscreen().catch(() => {});
-            }
         });
     })();
     </script>
-
-    <?php if ($activeAttempt['expires_at']): ?>
-    <script>
-    const expiresAt = new Date(<?= json_encode($activeAttempt['expires_at']) ?>.replace(' ', 'T'));
-    const timerEl = document.getElementById('quiz-timer');
-    function tick() {
-        const diffMs = expiresAt - new Date();
-        if (diffMs <= 0) {
-            timerEl.textContent = '00:00';
-            alert('Se acabó el tiempo. El cuestionario se entregará automáticamente con lo que hayas respondido.');
-            document.getElementById('quiz-form').removeAttribute('onsubmit');
-            document.getElementById('quiz-form').submit();
-            return;
-        }
-        const totalSeconds = Math.floor(diffMs / 1000);
-        const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
-        const s = (totalSeconds % 60).toString().padStart(2, '0');
-        timerEl.textContent = `${m}:${s}`;
-        setTimeout(tick, 1000);
-    }
-    tick();
-    </script>
-    <?php endif; ?>
 
 <?php else: ?>
     <div class="card" style="text-align:center;">

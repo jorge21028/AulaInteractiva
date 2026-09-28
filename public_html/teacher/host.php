@@ -71,13 +71,48 @@ async function fetchState() {
     return res.json();
 }
 
-async function hostAction(action) {
+let busy = false; // true mientras se procesa un clic del profesor (bloquea polling y clics repetidos)
+
+async function hostAction(action, expected) {
     const res = await fetch(`${AULA_APP_URL}/api/games/host_action.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: GAME_CODE, action, csrf_token: CSRF_TOKEN }),
+        body: JSON.stringify({
+            code: GAME_CODE, action, csrf_token: CSRF_TOKEN,
+            expected_status: expected ? expected.status : undefined,
+            expected_index: expected ? expected.index : undefined,
+        }),
     });
     return res.json();
+}
+
+/**
+ * Enlaza un botón a una acción del anfitrión. El botón se bloquea al primer clic,
+ * envía el estado que el profesor está viendo (el servidor ignora la acción si la
+ * partida ya cambió) y se ignoran los clics repetidos durante un instante.
+ */
+function bindAction(buttonId, action, g) {
+    const btn = document.getElementById(buttonId);
+    if (!btn) return;
+    const expected = { status: g.status, index: g.current_question_index };
+    btn.onclick = async () => {
+        if (busy) return;
+        busy = true;
+        btn.disabled = true;
+        const originalText = btn.textContent;
+        btn.textContent = 'Un momento...';
+        try {
+            await hostAction(action, expected);
+        } catch (e) {
+            console.error(e);
+        }
+        // Pequeña pausa para absorber un segundo clic accidental antes de reactivar
+        setTimeout(async () => {
+            busy = false;
+            lastSignature = null; // fuerza a redibujar con el estado nuevo
+            await poll(true);
+        }, 700);
+    };
 }
 
 function renderPlayers(players) {
@@ -89,21 +124,43 @@ function renderPlayers(players) {
     ).join('') + '</div>';
 }
 
+let lastSignature = null;
+
 function render(data) {
     const panel = document.getElementById('host-panel');
     if (!data.success) {
         panel.innerHTML = `<div class="alert alert-error">${data.message}</div>`;
+        lastSignature = null;
         return;
     }
     const g = data.game;
 
+    // Firma estructural: solo se redibuja TODO el panel cuando cambia la fase o la pregunta.
+    // Mientras tanto solo se actualizan los datos que cambian (tiempo, respuestas, jugadores).
+    // Antes se reemplazaba el panel completo cada 2 segundos y el botón desaparecía a mitad
+    // del clic, por eso a veces "no respondía".
+    const signature = `${g.status}:${g.current_question_index}`;
+
+    if (signature === lastSignature) {
+        const live = document.getElementById('live-meta');
+        if (live && g.status === 'question') {
+            live.textContent = `Tiempo restante: ${data.question.time_remaining}s · Respondieron: ${data.question.answered_count} de ${g.players_count}`;
+        }
+        const box = document.getElementById('players-box');
+        if (box) box.innerHTML = renderPlayers(data.players);
+        const title = document.getElementById('waiting-title');
+        if (title) title.textContent = `Esperando jugadores (${g.players_count})`;
+        return;
+    }
+    lastSignature = signature;
+
     if (g.status === 'waiting') {
         panel.innerHTML = `
-            <h2 style="margin-top:0;">Esperando jugadores (${g.players_count})</h2>
-            ${renderPlayers(data.players)}
+            <h2 style="margin-top:0;" id="waiting-title">Esperando jugadores (${g.players_count})</h2>
+            <div id="players-box">${renderPlayers(data.players)}</div>
             <button class="btn" id="btn-start">Iniciar partida</button>
         `;
-        document.getElementById('btn-start').onclick = async () => { await hostAction('next'); poll(); };
+        bindAction('btn-start', 'next', g);
     } else if (g.status === 'question') {
         const q = data.question;
         let bodyHtml = '';
@@ -119,10 +176,10 @@ function render(data) {
             <p style="font-size:1.2rem;">${q.statement}</p>
             ${q.image_url ? `<img src="${q.image_url}" style="max-width:100%; max-height:200px; border-radius:8px; display:block; margin:8px auto;">` : ''}
             ${bodyHtml}
-            <p class="text-muted">Tiempo restante: ${q.time_remaining}s · Respondieron: ${q.answered_count} de ${g.players_count}</p>
+            <p class="text-muted" id="live-meta">Tiempo restante: ${q.time_remaining}s · Respondieron: ${q.answered_count} de ${g.players_count}</p>
             <button class="btn" id="btn-results">Ver resultados ahora</button>
         `;
-        document.getElementById('btn-results').onclick = async () => { await hostAction('next'); poll(); };
+        bindAction('btn-results', 'next', g);
     } else if (g.status === 'question_results') {
         const r = data.results;
         let bodyHtml = '';
@@ -143,13 +200,10 @@ function render(data) {
             <p style="font-size:1.1rem;">${r.statement}</p>
             ${bodyHtml}
             <h3>Ranking actual</h3>
-            ${renderPlayers(data.players)}
+            <div id="players-box">${renderPlayers(data.players)}</div>
             <button class="btn" id="btn-next">${isLast ? 'Finalizar partida' : 'Siguiente pregunta'}</button>
         `;
-        document.getElementById('btn-next').onclick = async () => {
-            await hostAction(isLast ? 'finish' : 'next');
-            poll();
-        };
+        bindAction('btn-next', isLast ? 'finish' : 'next', g);
     } else if (g.status === 'finished') {
         const podium = data.players.slice(0, 3);
         const medals = ['🥇', '🥈', '🥉'];
@@ -164,19 +218,23 @@ function render(data) {
 }
 
 let polling = true;
-async function poll() {
+let pollTimer = null;
+async function poll(immediate) {
     if (!polling) return;
-    try {
-        const data = await fetchState();
-        render(data);
-        if (data.success && data.game.status === 'finished') {
-            polling = false;
-            return;
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    if (!busy) {
+        try {
+            const data = await fetchState();
+            if (!busy) render(data); // si el profesor hizo clic mientras llegaba la respuesta, se descarta
+            if (data.success && data.game.status === 'finished') {
+                polling = false;
+                return;
+            }
+        } catch (e) {
+            console.error(e);
         }
-    } catch (e) {
-        console.error(e);
     }
-    setTimeout(poll, 2000);
+    pollTimer = setTimeout(poll, 2000);
 }
 poll();
 </script>

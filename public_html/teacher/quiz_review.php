@@ -50,7 +50,7 @@ require __DIR__ . '/../includes/header.php';
         </p>
         <?php if ((int) $attempt['tab_switches'] > 0): ?>
             <p style="color:#C0392B; font-weight:600;">
-                🚩 Cambió de pestaña o salió de pantalla completa <?= (int) $attempt['tab_switches'] ?> vez(veces) durante este intento.
+                🚩 Salió de la pantalla del cuestionario <?= (int) $attempt['tab_switches'] ?> vez(veces) durante este intento (<?= (int) $attempt['tab_switches'] >= 3 ? 'strike 3: el intento se cerró y se entregó automáticamente' : 'strikes' ?>).
             </p>
         <?php else: ?>
             <p class="text-muted" style="font-size:0.85rem;">Sin cambios de pestaña detectados durante el intento.</p>

@@ -5,9 +5,9 @@
  *
  * El estudiante (vía JS en student/quiz_attempt.php) avisa que cambió de
  * pestaña, minimizó, o salió de pantalla completa mientras tenía un intento
- * de cuestionario en curso. Solo suma +1 al contador del intento; nunca
- * interrumpe ni invalida el intento (la decisión de qué hacer con eso queda
- * en manos del profesor, que ve el conteo).
+ * de cuestionario en curso. Cada aviso es un strike (sistema de 3 strikes):
+ *   1.º: -10 % del tiempo establecido · 2.º: -20 % · 3.º: se cierra el intento.
+ * Responde con el detalle para que la pantalla del estudiante muestre la alerta.
  */
 define('AULA_APP', true);
 require_once __DIR__ . '/../../config/config.php';
@@ -28,6 +28,10 @@ if ($attemptId <= 0) {
 }
 
 $pdo = Database::getConnection();
-quiz_record_tab_switch($pdo, $attemptId, current_user_id());
+$result = quiz_register_strike($pdo, $attemptId, current_user_id());
 
-json_response(['success' => true]);
+if (empty($result['active'])) {
+    json_response(['success' => true, 'active' => false]);
+}
+
+json_response(['success' => true] + $result);

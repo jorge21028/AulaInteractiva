@@ -100,32 +100,64 @@ function game_auto_advance_if_expired(PDO $pdo, array $game, array $questions): 
  */
 function game_advance(PDO $pdo, array $game, array $questions): array
 {
-    $nextIndex = (int) $game['current_question_index'] + 1;
+    $oldIndex = (int) $game['current_question_index'];
+    $oldStatus = $game['status'];
+    $nextIndex = $oldIndex + 1;
 
+    // Todas las actualizaciones son condicionales al estado que el llamador vio
+    // (estado + índice). Si otra petición ya avanzó la partida (doble clic, dos
+    // pestañas del profesor), esta no hace nada y se devuelve el estado real.
     if ($nextIndex >= count($questions)) {
         $stmt = $pdo->prepare(
-            "UPDATE games SET status = 'finished', finished_at = :finished_at WHERE id = :id"
+            "UPDATE games SET status = 'finished', finished_at = :finished_at
+             WHERE id = :id AND status = :old_status AND current_question_index = :old_index"
         );
-        $stmt->execute(['finished_at' => now_datetime(), 'id' => $game['id']]);
-        $game['status'] = 'finished';
-        $game['finished_at'] = now_datetime();
-        return $game;
+        $stmt->execute([
+            'finished_at' => now_datetime(), 'id' => $game['id'],
+            'old_status' => $oldStatus, 'old_index' => $oldIndex,
+        ]);
+        $game['_advanced'] = $stmt->rowCount() > 0;
+        if ($game['_advanced']) {
+            $game['status'] = 'finished';
+            $game['finished_at'] = now_datetime();
+            return $game;
+        }
+        return game_reload_after_conflict($pdo, $game);
     }
 
     $stmt = $pdo->prepare(
-        "UPDATE games SET status = 'question', current_question_index = :idx, current_question_started_at = :started_at WHERE id = :id"
+        "UPDATE games SET status = 'question', current_question_index = :idx, current_question_started_at = :started_at
+         WHERE id = :id AND status = :old_status AND current_question_index = :old_index"
     );
     $stmt->execute([
         'idx'        => $nextIndex,
         'started_at' => now_datetime(),
         'id'         => $game['id'],
+        'old_status' => $oldStatus,
+        'old_index'  => $oldIndex,
     ]);
+
+    if ($stmt->rowCount() === 0) {
+        return game_reload_after_conflict($pdo, $game);
+    }
 
     $game['status'] = 'question';
     $game['current_question_index'] = $nextIndex;
     $game['current_question_started_at'] = now_datetime();
+    $game['_advanced'] = true;
 
     return $game;
+}
+
+/**
+ * Recarga la partida desde la base de datos cuando un avance no se aplicó
+ * porque el estado ya había cambiado. Marca '_advanced' = false.
+ */
+function game_reload_after_conflict(PDO $pdo, array $game): array
+{
+    $fresh = game_find_by_id($pdo, (int) $game['id']) ?: $game;
+    $fresh['_advanced'] = false;
+    return $fresh;
 }
 
 /**
