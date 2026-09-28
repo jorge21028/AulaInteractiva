@@ -52,9 +52,14 @@ require __DIR__ . '/../includes/header.php';
     border: 3px solid #4FA898;
     overflow: hidden;
     touch-action: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    justify-content: center;
+    gap: 20px;
+    padding: 24px 20px 110px; /* el padding inferior deja espacio para el punto de partida de la rana */
   }
   .sapito-lilypad {
-    position: absolute;
     width: 130px;
     min-height: 90px;
     background: radial-gradient(circle at 35% 30%, #7BC96F 0%, #4C9A4A 70%, #3E7F3D 100%);

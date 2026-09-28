@@ -43,6 +43,13 @@ if ($tema === '') {
     json_response(['success' => false, 'error' => 'Indica el tema de la actividad.'], 400);
 }
 
+// Solo existen dos tipos de pregunta vigentes; cualquier otro valor (por
+// ejemplo de una pestaña vieja del formulario) se trata como "mixto".
+$tipo = clean_string($input['tipo'] ?? 'mixto');
+if (!in_array($tipo, ['mixto', 'multiple', 'truefalse'], true)) {
+    $tipo = 'mixto';
+}
+
 $params = [
     'subject_name' => $subject['subject_name'],
     'tema'         => $tema,
@@ -50,7 +57,7 @@ $params = [
     'objetivo'     => clean_string($input['objetivo'] ?? ''),
     'cantidad'     => (int) ($input['cantidad'] ?? 10),
     'dificultad'   => clean_string($input['dificultad'] ?? 'media'),
-    'tipo'         => clean_string($input['tipo'] ?? 'mixto'),
+    'tipo'         => $tipo,
     'tiempo'       => (int) ($input['tiempo'] ?? 20),
     'instrucciones_adicionales' => clean_string($input['instrucciones_adicionales'] ?? ''),
 ];

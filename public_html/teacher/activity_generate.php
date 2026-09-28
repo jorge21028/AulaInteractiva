@@ -69,8 +69,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
                 if (!is_array($q)) {
                     continue;
                 }
-                $type = in_array($q['tipo'] ?? '', ['multiple', 'truefalse', 'ordenar', 'relacionar', 'completar'], true)
-                    ? $q['tipo'] : 'multiple';
+                // Solo se guardan preguntas de selección múltiple y verdadero/falso;
+                // los tipos ordenar/relacionar/completar fueron descontinuados, así
+                // que cualquier pregunta de otro tipo simplemente se omite.
+                $type = $q['tipo'] ?? '';
+                if (!in_array($type, ['multiple', 'truefalse'], true)) {
+                    continue;
+                }
                 $statement = clean_string($q['enunciado'] ?? '');
                 if ($statement === '') {
                     continue;
@@ -80,8 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
                 $explanation = clean_string($q['explicacion'] ?? '');
                 $opciones = is_array($q['opciones'] ?? null) ? $q['opciones'] : [];
 
-                $minRequired = $type === 'completar' ? 1 : 2;
-                if (count($opciones) < $minRequired) {
+                if (count($opciones) < 2) {
                     continue;
                 }
 
@@ -92,20 +96,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
                 ]);
                 $questionId = (int) $pdo->lastInsertId();
 
-                // La regla de "exactamente una correcta" solo aplica a selección
-                // múltiple/verdadero-falso. En ordenar/relacionar/completar todas
-                // las opciones vienen marcadas como "correcta" (es un campo sin
-                // significado para esos tipos: lo que importa es el orden o el
-                // texto de match_text).
-                if ($type === 'multiple' || $type === 'truefalse') {
-                    $correctCount = 0;
-                    foreach ($opciones as $o) {
-                        if (!empty($o['correcta'])) {
-                            $correctCount++;
-                        }
+                // Exactamente una opción correcta: si vinieron 0 o varias marcadas,
+                // se deja como correcta solo la primera (el profesor la revisa luego).
+                $correctCount = 0;
+                foreach ($opciones as $o) {
+                    if (!empty($o['correcta'])) {
+                        $correctCount++;
                     }
-                } else {
-                    $correctCount = 1; // fuerza a no "corregir" nada para estos tipos
                 }
 
                 foreach ($opciones as $optIndex => $o) {
@@ -113,13 +110,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
                     if ($text === '') {
                         continue;
                     }
-                    $matchText = isset($o['match_text']) && $o['match_text'] !== null
-                        ? clean_string((string) $o['match_text']) : null;
-                    $isCorrect = ($type === 'multiple' || $type === 'truefalse')
-                        ? ($correctCount === 1 ? (bool) ($o['correcta'] ?? false) : ($optIndex === 0))
-                        : true;
+                    $isCorrect = $correctCount === 1 ? (bool) ($o['correcta'] ?? false) : ($optIndex === 0);
                     $insertOpt->execute([
-                        'qid' => $questionId, 'text' => $text, 'match_text' => $matchText,
+                        'qid' => $questionId, 'text' => $text, 'match_text' => null,
                         'correct' => $isCorrect ? 1 : 0, 'order_index' => $optIndex,
                     ]);
                 }
@@ -194,12 +187,9 @@ require __DIR__ . '/../includes/header.php';
 
                 <label for="tipo">Tipo de preguntas</label>
                 <select id="tipo" name="tipo">
-                    <option value="mixto">Mixto (variado, incluye todos los tipos)</option>
+                    <option value="mixto">Mixto (selección múltiple y verdadero/falso)</option>
                     <option value="multiple">Solo selección múltiple</option>
                     <option value="truefalse">Solo verdadero/falso</option>
-                    <option value="ordenar">Solo ordenar elementos</option>
-                    <option value="relacionar">Solo relacionar parejas</option>
-                    <option value="completar">Solo completar espacios</option>
                 </select>
 
                 <label for="tiempo">Tiempo por pregunta (segundos)</label>
@@ -281,9 +271,6 @@ require __DIR__ . '/../includes/header.php';
     const TYPE_LABELS = {
         multiple: 'Selección múltiple',
         truefalse: 'Verdadero/Falso',
-        ordenar: 'Ordenar elementos',
-        relacionar: 'Relacionar parejas',
-        completar: 'Completar espacios',
     };
 
     function renderPreview(activity) {
@@ -297,23 +284,11 @@ require __DIR__ . '/../includes/header.php';
             html += `<strong>${i + 1}. ${escapeHtml(q.enunciado)}</strong>`;
             html += `<p class="text-muted" style="font-size:0.8rem; margin:4px 0;">${TYPE_LABELS[q.tipo] || q.tipo} · ${q.tiempo}s · ${q.puntos} pts</p>`;
 
-            if (q.tipo === 'ordenar') {
-                html += '<ol style="margin:6px 0; padding-left:20px;">';
-                q.opciones.forEach(o => { html += `<li>${escapeHtml(o.texto)}</li>`; });
-                html += '</ol>';
-            } else if (q.tipo === 'relacionar') {
-                html += '<ul style="margin:6px 0; padding-left:20px; list-style:none;">';
-                q.opciones.forEach(o => { html += `<li>${escapeHtml(o.texto)} &harr; ${escapeHtml(o.match_text || '')}</li>`; });
-                html += '</ul>';
-            } else if (q.tipo === 'completar') {
-                html += `<p style="margin:6px 0; color:var(--color-success); font-weight:600;">Respuesta: ${escapeHtml(q.opciones[0]?.texto || '')}</p>`;
-            } else {
-                html += '<ul style="margin:6px 0; padding-left:20px;">';
-                q.opciones.forEach(o => {
-                    html += `<li style="${o.correcta ? 'color:var(--color-success); font-weight:600;' : ''}">${escapeHtml(o.texto)}${o.correcta ? ' ✓' : ''}</li>`;
-                });
-                html += '</ul>';
-            }
+            html += '<ul style="margin:6px 0; padding-left:20px;">';
+            q.opciones.forEach(o => {
+                html += `<li style="${o.correcta ? 'color:var(--color-success); font-weight:600;' : ''}">${escapeHtml(o.texto)}${o.correcta ? ' ✓' : ''}</li>`;
+            });
+            html += '</ul>';
 
             if (q.explicacion) {
                 html += `<p class="text-muted" style="font-size:0.8rem;">💡 ${escapeHtml(q.explicacion)}</p>`;
