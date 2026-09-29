@@ -30,22 +30,40 @@ require __DIR__ . '/../includes/header.php';
 <?php else: ?>
     <div id="projector-panel"><p class="text-muted" style="text-align:center;">Cargando...</p></div>
 
+    <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/wordgames.js"></script>
     <script>
     const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;
     const GAME_CODE = <?= json_encode($code) ?>;
 
     async function fetchState() {
-        const res = await fetch(`${AULA_APP_URL}/api/games/state.php?code=${GAME_CODE}&role=projector`);
+        const res = await fetch(`${AULA_APP_URL}/api/games/state.php?code=${GAME_CODE}&role=projector&full=1`);
         return res.json();
     }
+
+    let lastSig = null;
 
     function render(data) {
         const panel = document.getElementById('projector-panel');
         if (!data.success) {
+            lastSig = null;
             panel.innerHTML = `<div class="alert alert-error" style="text-align:center;">${data.message}</div>`;
             return;
         }
         const g = data.game;
+
+        // Solo se reconstruye cuando cambia la fase/pregunta; el resto se actualiza en sitio.
+        const sig = g.status === 'question' ? `q:${g.current_question_index}`
+            : (g.status === 'waiting' ? `w:${g.players_count}` : `${g.status}:${g.current_question_index}`);
+        if (sig === lastSig) {
+            if (g.status === 'question') {
+                const t = document.getElementById('pj-timer');
+                const c = document.getElementById('pj-count');
+                if (t) t.textContent = data.question.time_remaining + 's';
+                if (c) c.textContent = `Respondieron ${data.question.answered_count} de ${g.players_count}`;
+            }
+            return;
+        }
+        lastSig = sig;
 
         if (g.status === 'waiting') {
             panel.innerHTML = `
@@ -58,6 +76,32 @@ require __DIR__ . '/../includes/header.php';
             `;
         } else if (g.status === 'question') {
             const q = data.question;
+            if (q.type === 'palabra') {
+                panel.innerHTML = `
+                    <div class="card">
+                        <p class="text-muted" style="text-align:center;">Palabra ${g.current_question_index + 1} de ${g.total_questions} · 🪢 Ahorcado</p>
+                        <div class="projector-question">💡 ${WG.esc(q.statement)}</div>
+                        <div class="projector-timer" id="pj-timer">${q.time_remaining}s</div>
+                        <div style="transform:scale(1.25); transform-origin:top center; margin-bottom:40px;">
+                            ${WG.hangmanBoardHtml({ pattern: q.hangman.pattern, guessed: [], wrong: [], lives_left: q.hangman.max_lives, max_lives: q.hangman.max_lives }, { keyboard: false })}
+                        </div>
+                        <p style="text-align:center; margin-top:16px;" class="text-muted" id="pj-count">Respondieron ${q.answered_count} de ${g.players_count}</p>
+                    </div>
+                `;
+                return;
+            }
+            if (q.type === 'crucigrama') {
+                panel.innerHTML = `
+                    <div class="card">
+                        <p class="text-muted" style="text-align:center;">🧩 Crucigrama</p>
+                        <div class="projector-timer" id="pj-timer">${q.time_remaining}s</div>
+                        ${q.crossword ? WG.crosswordStaticHtml(q.crossword, 'blank', true) : '<p class="text-muted" style="text-align:center;">Cargando tablero...</p>'}
+                        <p style="text-align:center; margin-top:16px;" class="text-muted" id="pj-count">Respondieron ${q.answered_count} de ${g.players_count}</p>
+                    </div>
+                `;
+                if (!q.crossword) lastSig = null; // reintenta en el siguiente ciclo
+                return;
+            }
             const imageHtml = q.image_url ? `<img src="${q.image_url}" style="max-width:100%; max-height:280px; border-radius:8px; display:block; margin:10px auto;">` : '';
             let bodyHtml = '';
             if (g.game_mode === 'sapito' && q.type === 'multiple') {
@@ -81,9 +125,9 @@ require __DIR__ . '/../includes/header.php';
                     <p class="text-muted" style="text-align:center;">Pregunta ${g.current_question_index + 1} de ${g.total_questions}</p>
                     <div class="projector-question">${q.statement}</div>
                     ${imageHtml}
-                    <div class="projector-timer">${q.time_remaining}s</div>
+                    <div class="projector-timer" id="pj-timer">${q.time_remaining}s</div>
                     ${bodyHtml}
-                    <p style="text-align:center; margin-top:16px;" class="text-muted">Respondieron ${q.answered_count} de ${g.players_count}</p>
+                    <p style="text-align:center; margin-top:16px;" class="text-muted" id="pj-count">Respondieron ${q.answered_count} de ${g.players_count}</p>
                 </div>
             `;
         } else if (g.status === 'question_results') {
@@ -99,11 +143,16 @@ require __DIR__ . '/../includes/header.php';
                 bodyHtml = `<div class="projector-options">${r.correct_pairs.map(p => `<div class="projector-option">${p.left} ↔ ${p.right}</div>`).join('')}</div>`;
             } else if (r.type === 'completar') {
                 bodyHtml = `<p style="text-align:center; font-size:1.5rem; font-weight:700; color:var(--color-success);">${r.correct_answer}</p>`;
+            } else if (r.type === 'palabra') {
+                bodyHtml = `<p style="text-align:center; font-size:2.2rem; font-weight:800; letter-spacing:6px; color:var(--color-success);">${WG.esc(r.correct_answer.toUpperCase())}</p>
+                    <p class="text-muted" style="text-align:center;">La resolvieron ${r.solved_count} de ${r.finished_count} que terminaron</p>`;
+            } else if (r.type === 'crucigrama') {
+                bodyHtml = WG.crosswordStaticHtml(r.crossword, 'solution', true);
             }
             panel.innerHTML = `
                 <div class="card">
                     <p class="text-muted" style="text-align:center;">Resultados — Pregunta ${g.current_question_index + 1} de ${g.total_questions}</p>
-                    <div class="projector-question">${r.statement}</div>
+                    <div class="projector-question">${r.type === 'crucigrama' ? '🧩 Crucigrama' : (r.type === 'palabra' ? '💡 ' + WG.esc(r.statement) : r.statement)}</div>
                     ${bodyHtml}
                     <h3 style="text-align:center; margin-top:24px;">Ranking</h3>
                     ${renderRanking(data.players)}

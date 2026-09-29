@@ -47,12 +47,17 @@ if ($role === 'teacher') {
 }
 // role === 'projector': acceso abierto (pantalla de proyección en el salón), sin datos sensibles.
 
-$questions = activity_fetch_questions($pdo, (int) $game['activity_id']);
+$questions = game_fetch_steps($pdo, (int) $game['activity_id']);
 $game = game_auto_advance_if_expired($pdo, $game, $questions);
 
 $activityStmt = $pdo->prepare('SELECT title, ranking_enabled, game_mode FROM activities WHERE id = :id');
 $activityStmt->execute(['id' => $game['activity_id']]);
 $activity = $activityStmt->fetch();
+
+// Crucigrama: al terminar el tiempo (o la partida) se cierran y califican los borradores de quienes no pulsaron "Enviar".
+if (($activity['game_mode'] ?? '') === 'crucigrama' && in_array($game['status'], ['question_results', 'finished'], true)) {
+    crossword_finalize_drafts($pdo, $game);
+}
 
 $players = game_ranking($pdo, (int) $game['id']);
 
@@ -117,6 +122,54 @@ if ($game['status'] === 'question' && isset($questions[$idx])) {
         $response['question']['right_items'] = game_shuffled_right_items($q['options'], (int) $game['id'], (int) $q['id']);
     }
     // 'completar' no necesita opciones: el estudiante escribe la respuesta.
+
+    // ---- AHORCADO: una palabra por pregunta; las letras se validan en el servidor ----
+    if ($q['type'] === 'palabra') {
+        $word = (string) ($q['options'][0]['text'] ?? '');
+        $guesses = [];
+        $done = false;
+        if ($playerId) {
+            $hStmt = $pdo->prepare('SELECT answer_data FROM game_answers WHERE player_id = :player_id AND question_id = :question_id');
+            $hStmt->execute(['player_id' => $playerId, 'question_id' => $q['id']]);
+            $hRow = $hStmt->fetch();
+            if ($hRow) {
+                $hData = word_game_decode_answer($hRow['answer_data']);
+                $guesses = is_array($hData['g'] ?? null) ? $hData['g'] : [];
+                $done = !empty($hData['done']);
+            }
+        }
+        $hs = hangman_state($word, $guesses); // sin intentos: solo muestra la cantidad de letras
+        $response['question']['already_answered'] = $done;
+        $response['question']['my_option_id'] = null;
+        $response['question']['hangman'] = [
+            'pattern' => $hs['pattern'], 'guessed' => $hs['guessed'], 'wrong' => $hs['wrong'],
+            'lives_left' => $hs['lives_left'], 'max_lives' => $hs['max_lives'],
+            'solved' => $hs['solved'], 'lost' => $hs['lost'], 'done' => $done,
+        ];
+    }
+
+    // ---- CRUCIGRAMA: todo el tablero es un único paso ----
+    if ($q['type'] === 'crucigrama') {
+        $done = false;
+        $cells = [];
+        if ($playerId) {
+            $cStmt = $pdo->prepare('SELECT answer_data FROM game_answers WHERE player_id = :player_id AND question_id = :question_id');
+            $cStmt->execute(['player_id' => $playerId, 'question_id' => $q['id']]);
+            $cRow = $cStmt->fetch();
+            if ($cRow) {
+                $cData = word_game_decode_answer($cRow['answer_data']);
+                $done = !empty($cData['done']);
+                $cells = is_array($cData['cells'] ?? null) ? $cData['cells'] : [];
+            }
+        }
+        $response['question']['already_answered'] = $done;
+        $response['question']['my_option_id'] = null;
+        // El tablero solo se envía cuando el cliente lo pide (full=1): no cambia durante la pregunta.
+        if (($_GET['full'] ?? '') === '1') {
+            $response['question']['crossword'] = crossword_public_layout($q['layout']);
+            $response['question']['crossword']['my_cells'] = (object) $cells;
+        }
+    }
 }
 
 if ($game['status'] === 'question_results' && isset($questions[$idx])) {
@@ -173,6 +226,33 @@ if ($game['status'] === 'question_results' && isset($questions[$idx])) {
         $response['results']['my_result'] = $myAnswerRow ? [
             'is_correct' => (bool) $myAnswerRow['is_correct'],
             'points_awarded' => (int) $myAnswerRow['points_awarded'],
+        ] : null;
+    } elseif ($q['type'] === 'palabra') {
+        $rStmt = $pdo->prepare(
+            "SELECT COUNT(*) AS done_total, SUM(is_correct) AS solved_total FROM game_answers
+             WHERE game_id = :game_id AND question_id = :qid AND answer_data NOT LIKE :draft"
+        );
+        $rStmt->execute(['game_id' => $game['id'], 'qid' => $q['id'], 'draft' => '{"done":0%']);
+        $rSum = $rStmt->fetch();
+        $response['results']['correct_answer'] = $q['options'][0]['text'] ?? '';
+        $response['results']['solved_count'] = (int) ($rSum['solved_total'] ?? 0);
+        $response['results']['finished_count'] = (int) ($rSum['done_total'] ?? 0);
+        $mData = $myAnswerRow ? word_game_decode_answer($myAnswerRow['answer_data']) : [];
+        $response['results']['my_result'] = $myAnswerRow && !empty($mData['done']) ? [
+            'is_correct' => (bool) $myAnswerRow['is_correct'],
+            'points_awarded' => (int) $myAnswerRow['points_awarded'],
+        ] : null;
+    } elseif ($q['type'] === 'crucigrama') {
+        $solved = $q['layout'];
+        $response['results']['crossword'] = [
+            'rows' => $solved['rows'], 'cols' => $solved['cols'], 'words' => $solved['words'], // con respuestas
+        ];
+        $mData = $myAnswerRow ? word_game_decode_answer($myAnswerRow['answer_data']) : [];
+        $response['results']['my_result'] = $myAnswerRow ? [
+            'is_correct' => (bool) $myAnswerRow['is_correct'],
+            'points_awarded' => (int) $myAnswerRow['points_awarded'],
+            'correct_words' => (int) ($mData['correct_words'] ?? 0),
+            'total_words' => (int) ($mData['total_words'] ?? count($solved['words'])),
         ] : null;
     } elseif ($q['type'] === 'completar') {
         $response['results']['correct_answer'] = $q['options'][0]['text'] ?? '';

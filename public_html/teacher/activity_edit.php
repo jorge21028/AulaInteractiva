@@ -26,6 +26,8 @@ if (!$activity) {
     exit('Actividad no encontrada.');
 }
 
+$isWordGame = game_mode_is_word_game($activity['game_mode']); // ahorcado / crucigrama
+
 // Asignaturas del profesor (para poder mover la actividad a otra)
 $subjStmt = $pdo->prepare(
     'SELECT s.id, s.name, c.name AS course_name
@@ -90,7 +92,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if ($action === 'add_question') {
+    if ($action === 'add_word') {
+        if (!$isWordGame) {
+            $errors[] = 'Esta actividad no es un juego de palabras.';
+        } else {
+            $clue = clean_string($_POST['clue'] ?? '');
+            $word = clean_string($_POST['word'] ?? '');
+            $timeSeconds = max(5, (int) ($_POST['time_seconds'] ?? $activity['time_per_question']));
+            $points = max(10, (int) ($_POST['points'] ?? $activity['points_base']));
+            $wordError = word_validate_for_mode($word, $activity['game_mode']);
+
+            if ($clue === '') {
+                $errors[] = 'La pista no puede estar vacía.';
+            } elseif ($wordError !== null) {
+                $errors[] = $wordError;
+            } else {
+                $res = aiken_import_words_into_activity(
+                    $pdo, $activityId, [['clue' => $clue, 'word' => $word]], $timeSeconds, $points, $activity['game_mode']
+                );
+                if ($res['inserted'] > 0) {
+                    $notice = 'Palabra agregada.';
+                } else {
+                    $errors[] = 'Esa palabra ya está en el crucigrama.';
+                }
+            }
+        }
+    }
+
+    if ($action === 'add_question' && !$isWordGame) {
         $type = clean_string($_POST['type'] ?? 'multiple');
         $statement = clean_string($_POST['statement'] ?? '');
         $timeSeconds = max(5, (int) ($_POST['time_seconds'] ?? $activity['time_per_question']));
@@ -157,20 +186,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($content === false || trim($content) === '') {
                 $errors[] = 'El archivo está vacío o no se pudo leer.';
             } else {
-                $parsed = aiken_parse_questions($content);
+                if ($isWordGame) {
+                    $parsedWords = aiken_parse_words($content, $activity['game_mode']);
 
-                if (!empty($parsed['questions'])) {
-                    $imported = aiken_import_into_activity(
-                        $pdo, $activityId, $parsed['questions'],
-                        (int) $activity['time_per_question'], (int) $activity['points_base']
-                    );
-                    $notice = $imported . ' pregunta(s) importada(s) correctamente desde el archivo Aiken.';
+                    if (!empty($parsedWords['items'])) {
+                        $res = aiken_import_words_into_activity(
+                            $pdo, $activityId, $parsedWords['items'],
+                            (int) $activity['time_per_question'], (int) $activity['points_base'], $activity['game_mode']
+                        );
+                        $notice = $res['inserted'] . ' palabra(s) importada(s) correctamente desde el archivo Aiken.';
+                        foreach ($res['skipped'] as $dup) {
+                            $errors[] = 'La palabra "' . $dup . '" ya estaba en el crucigrama; se omitió.';
+                        }
+                    } else {
+                        $errors[] = 'No se encontró ninguna palabra válida en el archivo.';
+                    }
+
+                    foreach ($parsedWords['errors'] as $err) {
+                        $errors[] = $err;
+                    }
                 } else {
-                    $errors[] = 'No se encontró ninguna pregunta válida en el archivo.';
-                }
+                    $parsed = aiken_parse_questions($content);
 
-                foreach ($parsed['errors'] as $err) {
-                    $errors[] = $err;
+                    if (!empty($parsed['questions'])) {
+                        $imported = aiken_import_into_activity(
+                            $pdo, $activityId, $parsed['questions'],
+                            (int) $activity['time_per_question'], (int) $activity['points_base']
+                        );
+                        $notice = $imported . ' pregunta(s) importada(s) correctamente desde el archivo Aiken.';
+                    } else {
+                        $errors[] = 'No se encontró ninguna pregunta válida en el archivo.';
+                    }
+
+                    foreach ($parsed['errors'] as $err) {
+                        $errors[] = $err;
+                    }
                 }
             }
         }
@@ -189,7 +239,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qStmt->execute(['id' => $questionId, 'activity_id' => $activityId]);
         $q = $qStmt->fetch();
 
-        if ($q && !in_array($q['type'], ['ordenar', 'relacionar', 'completar'], true)) {
+        if ($q && $isWordGame) {
+            $errors[] = 'En los juegos de palabras no se duplican palabras (no puede haber dos iguales).';
+        } elseif ($q && !in_array($q['type'], ['ordenar', 'relacionar', 'completar'], true)) {
             $countStmt = $pdo->prepare('SELECT COUNT(*) AS total FROM activity_questions WHERE activity_id = :activity_id');
             $countStmt->execute(['activity_id' => $activityId]);
             $orderIndex = (int) ($countStmt->fetch()['total'] ?? 0);
@@ -252,7 +304,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $totalQuestions = (int) ($countStmt->fetch()['total'] ?? 0);
 
         if ($activity['status'] === 'draft' && $totalQuestions === 0) {
-            $errors[] = 'Agrega al menos una pregunta antes de publicar.';
+            $errors[] = $isWordGame ? 'Agrega al menos una palabra antes de publicar.' : 'Agrega al menos una pregunta antes de publicar.';
+        } elseif ($activity['status'] === 'draft' && $activity['game_mode'] === 'crucigrama'
+            && count(crossword_build_layout(activity_fetch_questions($pdo, $activityId))['words']) < 2) {
+            $errors[] = 'Un crucigrama necesita al menos 2 palabras que se crucen entre sí. Agrega más palabras (con letras en común).';
         } else {
             $newStatus = $activity['status'] === 'draft' ? 'published' : 'draft';
             $pdo->prepare('UPDATE activities SET status = :status WHERE id = :id')->execute(['status' => $newStatus, 'id' => $activityId]);
@@ -268,7 +323,7 @@ $pageTitle = $activity['title'];
 require __DIR__ . '/../includes/header.php';
 ?>
 <p><a href="activities.php">&larr; Volver a mis actividades</a></p>
-<h1><?= $activity['game_mode'] === 'sapito' ? '🐸 ' : '' ?><?= e($activity['title']) ?>
+<h1><?= e(game_mode_icon($activity['game_mode'])) ?> <?= e($activity['title']) ?>
     <span class="text-muted" style="font-size:0.9rem; font-weight:400;">
         (<?= $activity['status'] === 'published' ? 'Publicada' : 'Borrador' ?>)
     </span>
@@ -277,6 +332,17 @@ require __DIR__ . '/../includes/header.php';
     <p class="text-muted" style="margin-top:-8px;">
         Actividad de integración "El Sapito": el estudiante arrastra la respuesta hasta el nenúfar correcto.
         Cada pregunta tiene un enunciado y varias opciones (nenúfares); una es la correcta.
+    </p>
+<?php elseif ($activity['game_mode'] === 'ahorcado'): ?>
+    <p class="text-muted" style="margin-top:-8px;">
+        Actividad "Ahorcado": cada palabra tiene una pista y su respuesta. El estudiante adivina la palabra letra por letra
+        (6 vidas). Gana más puntos si la completa con más vidas y más rápido.
+    </p>
+<?php elseif ($activity['game_mode'] === 'crucigrama'): ?>
+    <p class="text-muted" style="margin-top:-8px;">
+        Actividad "Crucigrama": escribes las pistas y sus respuestas y el tablero se arma solo (las palabras se cruzan por las letras
+        que tienen en común). Todos los estudiantes resuelven el mismo tablero a la vez; la nota es la proporción de palabras acertadas.
+        El tiempo total es la suma del tiempo de cada palabra.
     </p>
 <?php endif; ?>
 
@@ -319,10 +385,10 @@ require __DIR__ . '/../includes/header.php';
                 <?php endforeach; ?>
             </select>
 
-            <label for="time_per_question">Tiempo por pregunta por defecto (segundos)</label>
+            <label for="time_per_question"><?= $isWordGame ? 'Tiempo por palabra por defecto (segundos)' : 'Tiempo por pregunta por defecto (segundos)' ?></label>
             <input type="text" id="time_per_question" name="time_per_question" value="<?= (int) $activity['time_per_question'] ?>">
 
-            <label for="points_base">Puntos base por pregunta por defecto</label>
+            <label for="points_base"><?= $isWordGame ? 'Puntos base por palabra por defecto' : 'Puntos base por pregunta por defecto' ?></label>
             <input type="text" id="points_base" name="points_base" value="<?= (int) $activity['points_base'] ?>">
 
             <label for="speed_bonus_max">Bonificación máxima por rapidez</label>
@@ -360,8 +426,9 @@ require __DIR__ . '/../includes/header.php';
     </section>
 
     <section class="card">
-        <h2 style="margin-top:0;">Preguntas (<?= count($questions) ?>)</h2>
+        <h2 style="margin-top:0;"><?= $isWordGame ? 'Palabras' : 'Preguntas' ?> (<?= count($questions) ?>)</h2>
 
+        <?php if (!$isWordGame): ?>
         <div class="card" style="background:#F8FAFC; margin-bottom:16px;">
             <h3 style="margin-top:0;">Importar preguntas desde archivo Aiken</h3>
             <p class="text-muted" style="font-size:0.85rem;">
@@ -386,6 +453,39 @@ ANSWER: B</pre>
                 <button type="submit" class="btn">Importar preguntas</button>
             </form>
         </div>
+        <?php else: ?>
+        <div class="card" style="background:#F8FAFC; margin-bottom:16px;">
+            <h3 style="margin-top:0;">Importar palabras desde archivo Aiken</h3>
+            <p class="text-muted" style="font-size:0.85rem;">
+                Sube un archivo <code>.txt</code>. El enunciado es la <strong>pista</strong> y la respuesta es la
+                <strong>palabra</strong>. Puedes usar el Aiken de siempre (la palabra es el texto de la opción correcta):
+            </p>
+            <pre style="background:#fff; border:1px solid var(--color-border); border-radius:8px; padding:10px 14px; font-size:0.8rem; overflow-x:auto;">Capital de Francia
+A) Madrid
+B) París
+C) Roma
+ANSWER: B</pre>
+            <p class="text-muted" style="font-size:0.85rem;">…o la forma corta, con la palabra directamente:</p>
+            <pre style="background:#fff; border:1px solid var(--color-border); border-radius:8px; padding:10px 14px; font-size:0.8rem; overflow-x:auto;">Proceso por el que las plantas fabrican su alimento
+ANSWER: Fotosíntesis</pre>
+            <p class="text-muted" style="font-size:0.8rem;">
+                Separa cada palabra con una línea en blanco. Las tildes no importan al jugar (los estudiantes escriben sin tilde).
+                <?php if ($activity['game_mode'] === 'crucigrama'): ?>
+                    En el crucigrama las palabras deben tener de 2 a 15 letras, sin números ni símbolos, y no pueden repetirse.
+                <?php else: ?>
+                    En el ahorcado puedes usar frases cortas (hasta 40 caracteres).
+                <?php endif; ?>
+                Se importan con <?= (int) $activity['time_per_question'] ?>s y <?= (int) $activity['points_base'] ?> pts por palabra (editables después).
+            </p>
+            <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" enctype="multipart/form-data" style="margin-top:12px;">
+                <?php csrf_field(); ?>
+                <input type="hidden" name="action" value="import_aiken">
+                <label for="aiken_file">Archivo (.txt)</label>
+                <input type="file" id="aiken_file" name="aiken_file" accept=".txt,text/plain" required>
+                <button type="submit" class="btn">Importar palabras</button>
+            </form>
+        </div>
+        <?php endif; ?>
 
         <?php if (empty($questions)): ?>
             <p class="empty-state">Sin preguntas todavía.</p>
@@ -395,11 +495,16 @@ ANSWER: B</pre>
                 <div class="card" style="margin-bottom:10px; padding:14px 16px;">
                     <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
                         <div>
-                            <strong><?= $i + 1 ?>. <?= e(truncate_text($q['statement'], 80)) ?></strong>
+                            <strong><?= $i + 1 ?>. <?= $q['type'] === 'palabra' ? '💡 ' : '' ?><?= e(truncate_text($q['statement'], 80)) ?></strong>
                             <p class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">
-                                <?= e(question_type_label($q['type'])) ?> ·
-                                <?= (int) $q['time_seconds'] ?>s · <?= (int) $q['points'] ?> pts ·
-                                <?= count($q['options']) ?> opciones
+                                <?php if ($q['type'] === 'palabra'): ?>
+                                    Respuesta: <strong><?= e($q['options'][0]['text'] ?? '—') ?></strong> ·
+                                    <?= (int) $q['time_seconds'] ?>s · <?= (int) $q['points'] ?> pts
+                                <?php else: ?>
+                                    <?= e(question_type_label($q['type'])) ?> ·
+                                    <?= (int) $q['time_seconds'] ?>s · <?= (int) $q['points'] ?> pts ·
+                                    <?= count($q['options']) ?> opciones
+                                <?php endif; ?>
                             </p>
                             <?php if ($isDeprecatedType): ?>
                                 <p class="alert alert-error" style="margin:6px 0 0; padding:6px 10px; font-size:0.8rem;">
@@ -412,7 +517,7 @@ ANSWER: B</pre>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
                         <a class="btn btn-secondary" style="margin:0; padding:6px 12px; font-size:0.85rem;" href="activity_question.php?id=<?= (int) $q['id'] ?>">Editar</a>
 
-                        <?php if (!$isDeprecatedType): ?>
+                        <?php if (!$isDeprecatedType && !$isWordGame): ?>
                         <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" style="display:inline;">
                             <?php csrf_field(); ?>
                             <input type="hidden" name="action" value="duplicate_question">
@@ -451,6 +556,50 @@ ANSWER: B</pre>
             <?php endforeach; ?>
         <?php endif; ?>
 
+        <?php if ($activity['game_mode'] === 'crucigrama' && !empty($questions)):
+            $cwLayout = crossword_build_layout($questions);
+            if (!empty($cwLayout['words'])): ?>
+            <div class="card" style="background:#F8FAFC; margin-top:16px;">
+                <h3 style="margin-top:0;">Vista previa del tablero (con respuestas)</h3>
+                <p class="text-muted" style="font-size:0.85rem; margin-top:-6px;">
+                    <?= count($cwLayout['words']) ?> palabras colocadas · <?= (int) $cwLayout['rows'] ?> × <?= (int) $cwLayout['cols'] ?> casillas.
+                    El tablero es siempre el mismo para todos los estudiantes y cambia si agregas o quitas palabras.
+                </p>
+                <?= crossword_render_solution_html($cwLayout) ?>
+                <?php if (!empty($cwLayout['unplaced'])): ?>
+                    <div class="alert alert-error" style="font-size:0.85rem;">
+                        No se pudieron cruzar con el resto (no comparten letras con las demás palabras) y <strong>no aparecerán</strong> en el juego:
+                        <?php foreach ($cwLayout['unplaced'] as $up): ?>
+                            <strong><?= e($up['word']) ?></strong>
+                        <?php endforeach; ?>
+                        . Cambia la palabra o agrega otras que compartan letras con ellas.
+                    </div>
+                <?php endif; ?>
+            </div>
+        <?php endif; endif; ?>
+
+        <?php if ($isWordGame): ?>
+        <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" style="margin-top:16px;" id="add-word-form">
+            <?php csrf_field(); ?>
+            <input type="hidden" name="action" value="add_word">
+
+            <h3 style="margin-bottom:0;">Agregar una palabra</h3>
+
+            <label for="clue">Pista (enunciado)</label>
+            <textarea id="clue" name="clue" rows="2" required placeholder="Ej: Proceso por el que las plantas fabrican su alimento"></textarea>
+
+            <label for="word">Palabra (respuesta)</label>
+            <input type="text" id="word" name="word" required maxlength="40" autocomplete="off" placeholder="Ej: Fotosíntesis">
+
+            <label for="time_seconds"><?= $activity['game_mode'] === 'crucigrama' ? 'Tiempo que aporta al crucigrama (segundos)' : 'Tiempo (segundos)' ?></label>
+            <input type="text" id="time_seconds" name="time_seconds" value="<?= (int) $activity['time_per_question'] ?>">
+
+            <label for="points">Puntos</label>
+            <input type="text" id="points" name="points" value="<?= (int) $activity['points_base'] ?>">
+
+            <button type="submit" class="btn">Agregar palabra</button>
+        </form>
+        <?php else: ?>
         <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" style="margin-top:16px;" id="add-question-form">
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="add_question">
@@ -483,6 +632,7 @@ ANSWER: B</pre>
                 para agregar las opciones y marcar la correcta.
             </p>
         </form>
+        <?php endif; ?>
     </section>
 </div>
 <?php require __DIR__ . '/../includes/footer.php'; ?>

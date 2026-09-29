@@ -2,6 +2,7 @@
 define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/game_helpers.php'; // también carga los helpers de juegos de palabras
 
 require_role('teacher');
 
@@ -13,7 +14,7 @@ $notice = null;
 
 // Cargar pregunta y verificar propiedad a través de la actividad
 $stmt = $pdo->prepare(
-    'SELECT q.*, a.id AS activity_id, a.teacher_id, a.title AS activity_title
+    'SELECT q.*, a.id AS activity_id, a.teacher_id, a.title AS activity_title, a.game_mode
      FROM activity_questions q
      INNER JOIN activities a ON a.id = q.activity_id
      WHERE q.id = :id AND a.teacher_id = :teacher_id LIMIT 1'
@@ -92,6 +93,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->prepare('UPDATE question_options SET is_correct = 1 WHERE id = :id AND question_id = :qid')
             ->execute(['id' => $optionId, 'qid' => $questionId]);
         $notice = 'Respuesta correcta actualizada.';
+    }
+
+    // ---- Juegos de palabras (ahorcado / crucigrama): editar la palabra respuesta ----
+    if ($action === 'update_word' && $question['type'] === 'palabra') {
+        $word = clean_string($_POST['word'] ?? '');
+        $wordError = word_validate_for_mode($word, $question['game_mode']);
+
+        if ($wordError !== null) {
+            $errors[] = $wordError;
+        } else {
+            $duplicate = false;
+            if ($question['game_mode'] === 'crucigrama') {
+                foreach (word_activity_words($pdo, (int) $question['activity_id']) as $w) {
+                    if ((int) $w['id'] !== $questionId && word_letters($w['word']) === word_letters($word)) {
+                        $duplicate = true;
+                        break;
+                    }
+                }
+            }
+            if ($duplicate) {
+                $errors[] = 'Esa palabra ya existe en el crucigrama.';
+            } else {
+                $exists = $pdo->prepare('SELECT id FROM question_options WHERE question_id = :qid ORDER BY order_index ASC, id ASC LIMIT 1');
+                $exists->execute(['qid' => $questionId]);
+                $optRow = $exists->fetch();
+                if ($optRow) {
+                    $pdo->prepare('UPDATE question_options SET text = :text, is_correct = 1 WHERE id = :id')
+                        ->execute(['text' => $word, 'id' => $optRow['id']]);
+                } else {
+                    $pdo->prepare('INSERT INTO question_options (question_id, text, is_correct, order_index) VALUES (:qid, :text, 1, 0)')
+                        ->execute(['qid' => $questionId, 'text' => $word]);
+                }
+                $notice = 'Palabra actualizada.';
+            }
+        }
     }
 
     // ---- Preguntas de "completar": editar la respuesta correcta ----
@@ -208,7 +244,7 @@ $pageTitle = 'Editar pregunta';
 require __DIR__ . '/../includes/header.php';
 ?>
 <p><a href="activity_edit.php?id=<?= (int) $question['activity_id'] ?>">&larr; Volver a "<?= e($question['activity_title']) ?>"</a></p>
-<h1>Editar pregunta</h1>
+<h1><?= $question['type'] === 'palabra' ? 'Editar palabra' : 'Editar pregunta' ?></h1>
 
 <?php foreach ($errors as $error): ?>
     <div class="alert alert-error"><?= e($error) ?></div>
@@ -227,7 +263,7 @@ require __DIR__ . '/../includes/header.php';
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="update_question">
 
-            <label for="statement">Pregunta</label>
+            <label for="statement"><?= $question['type'] === 'palabra' ? 'Pista' : 'Pregunta' ?></label>
             <textarea id="statement" name="statement" rows="3" required><?= e($question['statement']) ?></textarea>
 
             <label for="time_seconds">Tiempo (segundos)</label>
@@ -447,6 +483,20 @@ require __DIR__ . '/../includes/header.php';
                 <button type="submit" class="btn">Agregar pareja</button>
             </form>
 
+        <?php elseif ($question['type'] === 'palabra'): ?>
+            <h2 style="margin-top:0;">Palabra respuesta</h2>
+            <p class="text-muted" style="font-size:0.85rem;">
+                <?= $question['game_mode'] === 'crucigrama'
+                    ? 'De 2 a 15 letras, sin números ni símbolos. Las tildes se conservan en pantalla pero los estudiantes escriben sin tilde.'
+                    : 'Puede ser una palabra o una frase corta. Los estudiantes adivinan letra por letra (las tildes no cuentan).' ?>
+            </p>
+            <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>">
+                <?php csrf_field(); ?>
+                <input type="hidden" name="action" value="update_word">
+                <label for="word">Palabra</label>
+                <input type="text" id="word" name="word" required maxlength="40" autocomplete="off" value="<?= e($options[0]['text'] ?? '') ?>">
+                <button type="submit" class="btn">Guardar palabra</button>
+            </form>
         <?php elseif ($question['type'] === 'completar'): ?>
             <h2 style="margin-top:0;">Respuesta correcta</h2>
             <p class="text-muted" style="font-size:0.85rem;">

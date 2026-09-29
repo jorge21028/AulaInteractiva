@@ -47,7 +47,7 @@ require __DIR__ . '/../includes/header.php';
 <p><a href="activity_edit.php?id=<?= (int) $activityId ?>">&larr; Volver a la actividad</a></p>
 
 <div class="card" style="text-align:center;">
-    <h1 style="margin-top:0;"><?= $activity['game_mode'] === 'sapito' ? '🐸 ' : '' ?><?= e($activity['title']) ?></h1>
+    <h1 style="margin-top:0;"><?= e(game_mode_icon($activity['game_mode'])) ?> <?= e($activity['title']) ?></h1>
     <p class="text-muted">Código de la partida — compártelo con tus estudiantes</p>
     <div style="font-size:3rem; font-weight:800; letter-spacing:6px; color:var(--color-primary-dark);" id="game-code"><?= e($game['code']) ?></div>
     <p class="text-muted" style="margin-top:8px;">
@@ -57,6 +57,7 @@ require __DIR__ . '/../includes/header.php';
     </p>
 </div>
 
+<script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/wordgames.js"></script>
 <section class="card" id="host-panel" style="margin-top:16px;">
     <p class="text-muted">Cargando estado de la partida...</p>
 </section>
@@ -144,7 +145,7 @@ function render(data) {
     if (signature === lastSignature) {
         const live = document.getElementById('live-meta');
         if (live && g.status === 'question') {
-            live.textContent = `Tiempo restante: ${data.question.time_remaining}s · Respondieron: ${data.question.answered_count} de ${g.players_count}`;
+            live.textContent = `Tiempo restante: ${data.question.time_remaining}s · ${data.question.type === 'palabra' || data.question.type === 'crucigrama' ? 'Terminaron' : 'Respondieron'}: ${data.question.answered_count} de ${g.players_count}`;
         }
         const box = document.getElementById('players-box');
         if (box) box.innerHTML = renderPlayers(data.players);
@@ -171,6 +172,18 @@ function render(data) {
         } else if (q.type === 'completar') {
             bodyHtml = `<p class="text-muted">El estudiante debe completar el espacio en blanco.</p>`;
         }
+        if (q.type === 'palabra' || q.type === 'crucigrama') {
+            const isCw = q.type === 'crucigrama';
+            panel.innerHTML = `
+                <h2 style="margin-top:0;">${isCw ? '🧩 Crucigrama en curso' : `🪢 Palabra ${g.current_question_index + 1} de ${g.total_questions}`}</h2>
+                ${isCw ? '<p class="text-muted">Los estudiantes resuelven todo el tablero a la vez; se califica al enviar o al terminar el tiempo.</p>'
+                       : `<p style="font-size:1.2rem;">💡 ${WG.esc(q.statement)}</p>`}
+                <p class="text-muted" id="live-meta">Tiempo restante: ${q.time_remaining}s · Terminaron: ${q.answered_count} de ${g.players_count}</p>
+                <button class="btn" id="btn-results">Ver resultados ahora</button>
+            `;
+            bindAction('btn-results', 'next', g);
+            return;
+        }
         panel.innerHTML = `
             <h2 style="margin-top:0;">Pregunta ${g.current_question_index + 1} de ${g.total_questions}</h2>
             <p style="font-size:1.2rem;">${q.statement}</p>
@@ -193,11 +206,16 @@ function render(data) {
             bodyHtml = `<p><strong>Parejas correctas:</strong> ${r.correct_pairs.map(p => `${p.left} ↔ ${p.right}`).join(' · ')}</p>`;
         } else if (r.type === 'completar') {
             bodyHtml = `<p><strong>Respuesta correcta:</strong> ${r.correct_answer}</p>`;
+        } else if (r.type === 'palabra') {
+            bodyHtml = `<p><strong>Palabra:</strong> ${WG.esc(r.correct_answer.toUpperCase())}</p>
+                <p class="text-muted">La resolvieron ${r.solved_count} de ${r.finished_count} que terminaron.</p>`;
+        } else if (r.type === 'crucigrama') {
+            bodyHtml = WG.crosswordStaticHtml(r.crossword, 'solution', false);
         }
         const isLast = g.current_question_index >= g.total_questions - 1;
         panel.innerHTML = `
             <h2 style="margin-top:0;">Resultados — Pregunta ${g.current_question_index + 1} de ${g.total_questions}</h2>
-            <p style="font-size:1.1rem;">${r.statement}</p>
+            <p style="font-size:1.1rem;">${r.type === 'crucigrama' ? '' : (r.type === 'palabra' ? '💡 ' + WG.esc(r.statement) : r.statement)}</p>
             ${bodyHtml}
             <h3>Ranking actual</h3>
             <div id="players-box">${renderPlayers(data.players)}</div>

@@ -2,6 +2,7 @@
 define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/game_helpers.php'; // iconos de modos de juego
 require_once __DIR__ . '/../includes/assignment_helpers.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
 
@@ -235,7 +236,7 @@ require __DIR__ . '/../includes/header.php';
                     <label for="activity_id">Actividad (debe estar publicada)</label>
                     <select id="activity_id" name="activity_id">
                         <?php foreach ($activities as $a): ?>
-                            <option value="<?= (int) $a['id'] ?>"><?= $a['game_mode'] === 'sapito' ? '🐸 ' : '🎯 ' ?><?= e($a['title']) ?></option>
+                            <option value="<?= (int) $a['id'] ?>"><?= e(game_mode_icon($a['game_mode'])) ?> <?= e($a['title']) ?></option>
                         <?php endforeach; ?>
                     </select>
                     <p class="text-muted" style="font-size:0.8rem;">

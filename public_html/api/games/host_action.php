@@ -56,7 +56,7 @@ if ($expectedIndex !== null && $expectedIndex !== (int) $game['current_question_
     json_response(['success' => true, 'stale' => true, 'status' => $game['status'], 'current_question_index' => (int) $game['current_question_index']]);
 }
 
-$questions = activity_fetch_questions($pdo, (int) $game['activity_id']);
+$questions = game_fetch_steps($pdo, (int) $game['activity_id']);
 
 if ($action === 'finish') {
     $stmt = $pdo->prepare("UPDATE games SET status = 'finished', finished_at = :finished_at WHERE id = :id AND status != 'finished'");

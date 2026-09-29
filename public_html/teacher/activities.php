@@ -2,6 +2,7 @@
 define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/game_helpers.php'; // etiquetas de modos de juego
 
 require_role('teacher');
 
@@ -27,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
     $title = clean_string($_POST['title'] ?? '');
     $subjectId = (int) ($_POST['subject_id'] ?? 0);
     $gameMode = clean_string($_POST['game_mode'] ?? 'trivia');
-    if (!in_array($gameMode, ['trivia', 'sapito'], true)) {
+    if (!in_array($gameMode, ['trivia', 'sapito', 'ahorcado', 'crucigrama'], true)) {
         $gameMode = 'trivia';
     }
 
@@ -53,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
             'teacher_id'        => $teacherId,
             'title'             => $title,
             'difficulty'        => 'media',
-            'time_per_question' => 20,
+            'time_per_question' => match ($gameMode) { 'ahorcado' => 60, 'crucigrama' => 30, default => 20 },
             'game_mode'         => $gameMode,
             'source'            => 'manual',
             'status'            => 'draft',
@@ -117,6 +118,8 @@ require __DIR__ . '/../includes/header.php';
             <select id="game_mode" name="game_mode">
                 <option value="trivia">🎯 Trivia clásica (preguntas y respuestas)</option>
                 <option value="sapito">🐸 El Sapito (arrastra la respuesta al nenúfar correcto)</option>
+                <option value="ahorcado">🪢 Ahorcado (adivina la palabra letra por letra a partir de una pista)</option>
+                <option value="crucigrama">🧩 Crucigrama (se arma solo con tus pistas y respuestas)</option>
             </select>
 
             <button type="submit" class="btn">Crear y continuar</button>
@@ -131,11 +134,11 @@ require __DIR__ . '/../includes/header.php';
             <div class="grid grid-2">
                 <?php foreach ($activities as $a): ?>
                     <a class="card" href="activity_edit.php?id=<?= (int) $a['id'] ?>" style="display:block;">
-                        <h3 style="margin-top:0;"><?= $a['game_mode'] === 'sapito' ? '🐸 ' : '' ?><?= e($a['title']) ?></h3>
+                        <h3 style="margin-top:0;"><?= e(game_mode_icon($a['game_mode'])) ?> <?= e($a['title']) ?></h3>
                         <p class="text-muted" style="margin-bottom:4px;"><?= e($a['subject_name']) ?></p>
                         <p class="text-muted" style="margin-bottom:0; font-size:0.85rem;">
-                            <?= $a['game_mode'] === 'sapito' ? 'El Sapito' : 'Trivia' ?> ·
-                            <?= (int) $a['questions_count'] ?> preguntas ·
+                            <?= e(game_mode_label($a['game_mode'])) ?> ·
+                            <?= (int) $a['questions_count'] ?> <?= game_mode_is_word_game($a['game_mode']) ? 'palabras' : 'preguntas' ?> ·
                             <?= $a['status'] === 'published' ? 'Publicada' : 'Borrador' ?> ·
                             Dificultad: <?= e($a['difficulty']) ?>
                         </p>
