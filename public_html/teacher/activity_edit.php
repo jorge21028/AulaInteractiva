@@ -49,10 +49,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $description = clean_string($_POST['description'] ?? '');
         $instructions = clean_string($_POST['instructions'] ?? '');
         $difficulty = clean_string($_POST['difficulty'] ?? 'media');
-        $timePerQuestion = max(5, (int) ($_POST['time_per_question'] ?? 20));
-        $pointsBase = max(10, (int) ($_POST['points_base'] ?? 100));
-        $speedBonusMax = max(0, (int) ($_POST['speed_bonus_max'] ?? 50));
-        $rankingEnabled = isset($_POST['ranking_enabled']) ? 1 : 0;
+        if ($isWordGame) {
+            // Ahorcado / crucigrama: sin cronómetro, sin bonos ni ranking; se conservan los valores internos.
+            $timePerQuestion = (int) $activity['time_per_question'];
+            $pointsBase = (int) $activity['points_base'];
+            $speedBonusMax = (int) $activity['speed_bonus_max'];
+            $rankingEnabled = (int) $activity['ranking_enabled'];
+        } else {
+            $timePerQuestion = max(5, (int) ($_POST['time_per_question'] ?? 20));
+            $pointsBase = max(10, (int) ($_POST['points_base'] ?? 100));
+            $speedBonusMax = max(0, (int) ($_POST['speed_bonus_max'] ?? 50));
+            $rankingEnabled = isset($_POST['ranking_enabled']) ? 1 : 0;
+        }
         $allowRepeat = isset($_POST['allow_repeat']) ? 1 : 0;
         $teamMode = isset($_POST['team_mode']) ? 1 : 0;
         $subjectId = (int) ($_POST['subject_id'] ?? $activity['subject_id']);
@@ -335,14 +343,14 @@ require __DIR__ . '/../includes/header.php';
     </p>
 <?php elseif ($activity['game_mode'] === 'ahorcado'): ?>
     <p class="text-muted" style="margin-top:-8px;">
-        Actividad "Ahorcado": cada palabra tiene una pista y su respuesta. El estudiante adivina la palabra letra por letra
-        (6 vidas). Gana más puntos si la completa con más vidas y más rápido.
+        Actividad "Ahorcado" individual: cada palabra tiene una pista y su respuesta. El estudiante la juega a su ritmo
+        (sin cronómetro, 6 vidas por palabra) desde su asignación. Nota = palabras adivinadas ÷ total de palabras.
     </p>
 <?php elseif ($activity['game_mode'] === 'crucigrama'): ?>
     <p class="text-muted" style="margin-top:-8px;">
-        Actividad "Crucigrama": escribes las pistas y sus respuestas y el tablero se arma solo (las palabras se cruzan por las letras
-        que tienen en común). Todos los estudiantes resuelven el mismo tablero a la vez; la nota es la proporción de palabras acertadas.
-        El tiempo total es la suma del tiempo de cada palabra.
+        Actividad "Crucigrama" individual: escribes las pistas y sus respuestas y el tablero se arma solo (las palabras se cruzan
+        por las letras que tienen en común). El estudiante lo resuelve a su ritmo, sin cronómetro, y su avance se guarda solo.
+        Nota = palabras acertadas ÷ total de palabras.
     </p>
 <?php endif; ?>
 
@@ -385,10 +393,11 @@ require __DIR__ . '/../includes/header.php';
                 <?php endforeach; ?>
             </select>
 
-            <label for="time_per_question"><?= $isWordGame ? 'Tiempo por palabra por defecto (segundos)' : 'Tiempo por pregunta por defecto (segundos)' ?></label>
+            <?php if (!$isWordGame): ?>
+            <label for="time_per_question">Tiempo por pregunta por defecto (segundos)</label>
             <input type="text" id="time_per_question" name="time_per_question" value="<?= (int) $activity['time_per_question'] ?>">
 
-            <label for="points_base"><?= $isWordGame ? 'Puntos base por palabra por defecto' : 'Puntos base por pregunta por defecto' ?></label>
+            <label for="points_base">Puntos base por pregunta por defecto</label>
             <input type="text" id="points_base" name="points_base" value="<?= (int) $activity['points_base'] ?>">
 
             <label for="speed_bonus_max">Bonificación máxima por rapidez</label>
@@ -398,14 +407,17 @@ require __DIR__ . '/../includes/header.php';
                 <input type="checkbox" name="ranking_enabled" style="width:auto;" <?= $activity['ranking_enabled'] ? 'checked' : '' ?>>
                 Mostrar ranking
             </label>
-            <label style="display:flex; align-items:center; gap:8px;">
+            <?php endif; ?>
+            <label style="display:flex; align-items:center; gap:8px;<?= $isWordGame ? ' margin-top:16px;' : '' ?>">
                 <input type="checkbox" name="allow_repeat" style="width:auto;" <?= $activity['allow_repeat'] ? 'checked' : '' ?>>
-                Permitir repetir la partida
+                <?= $isWordGame ? 'Permitir que el estudiante repita la actividad (se conserva su mejor nota)' : 'Permitir repetir la partida' ?>
             </label>
+            <?php if (!$isWordGame): ?>
             <label style="display:flex; align-items:center; gap:8px;">
                 <input type="checkbox" name="team_mode" style="width:auto;" <?= $activity['team_mode'] ? 'checked' : '' ?>>
                 Modo por equipos (próximamente)
             </label>
+            <?php endif; ?>
 
             <button type="submit" class="btn">Guardar datos</button>
         </form>
@@ -418,7 +430,12 @@ require __DIR__ . '/../includes/header.php';
             </button>
         </form>
 
-        <?php if ($activity['status'] === 'published'): ?>
+        <?php if ($isWordGame): ?>
+            <div class="alert alert-success" style="margin-top:12px; font-size:0.9rem;">
+                Esta actividad <strong>no se inicia en vivo</strong> y no tiene cronómetro. Publícala y asígnala desde
+                <a href="assignments.php">Asignaciones</a>: los estudiantes podrán jugarla a su ritmo apenas la vean asignada.
+            </div>
+        <?php elseif ($activity['status'] === 'published'): ?>
             <a class="btn" style="margin-top:12px; display:inline-block;" href="host.php?activity_id=<?= (int) $activityId ?>">
                 Iniciar partida
             </a>
@@ -475,7 +492,6 @@ ANSWER: Fotosíntesis</pre>
                 <?php else: ?>
                     En el ahorcado puedes usar frases cortas (hasta 40 caracteres).
                 <?php endif; ?>
-                Se importan con <?= (int) $activity['time_per_question'] ?>s y <?= (int) $activity['points_base'] ?> pts por palabra (editables después).
             </p>
             <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" enctype="multipart/form-data" style="margin-top:12px;">
                 <?php csrf_field(); ?>
@@ -498,8 +514,7 @@ ANSWER: Fotosíntesis</pre>
                             <strong><?= $i + 1 ?>. <?= $q['type'] === 'palabra' ? '💡 ' : '' ?><?= e(truncate_text($q['statement'], 80)) ?></strong>
                             <p class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">
                                 <?php if ($q['type'] === 'palabra'): ?>
-                                    Respuesta: <strong><?= e($q['options'][0]['text'] ?? '—') ?></strong> ·
-                                    <?= (int) $q['time_seconds'] ?>s · <?= (int) $q['points'] ?> pts
+                                    Respuesta: <strong><?= e($q['options'][0]['text'] ?? '—') ?></strong>
                                 <?php else: ?>
                                     <?= e(question_type_label($q['type'])) ?> ·
                                     <?= (int) $q['time_seconds'] ?>s · <?= (int) $q['points'] ?> pts ·
@@ -590,12 +605,6 @@ ANSWER: Fotosíntesis</pre>
 
             <label for="word">Palabra (respuesta)</label>
             <input type="text" id="word" name="word" required maxlength="40" autocomplete="off" placeholder="Ej: Fotosíntesis">
-
-            <label for="time_seconds"><?= $activity['game_mode'] === 'crucigrama' ? 'Tiempo que aporta al crucigrama (segundos)' : 'Tiempo (segundos)' ?></label>
-            <input type="text" id="time_seconds" name="time_seconds" value="<?= (int) $activity['time_per_question'] ?>">
-
-            <label for="points">Puntos</label>
-            <input type="text" id="points" name="points" value="<?= (int) $activity['points_base'] ?>">
 
             <button type="submit" class="btn">Agregar palabra</button>
         </form>

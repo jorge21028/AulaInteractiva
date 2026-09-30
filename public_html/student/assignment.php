@@ -11,7 +11,7 @@ $studentId = current_user_id();
 $assignmentId = (int) ($_GET['id'] ?? 0);
 
 $stmt = $pdo->prepare(
-    'SELECT a.*, act.id AS activity_id, act.title AS activity_title, qz.id AS quiz_id, qz.title AS quiz_title,
+    'SELECT a.*, act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, qz.id AS quiz_id, qz.title AS quiz_title,
         qz.time_limit_minutes, qz.max_attempts, s.name AS subject_name,
         sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id
      FROM assignments a
@@ -32,6 +32,14 @@ if (!$assignment) {
 $isOverdue = $assignment['due_date'] && strtotime($assignment['due_date']) < time();
 $isQuiz = $assignment['quiz_id'] !== null;
 $isCreation = $assignment['activity_id'] === null && !$isQuiz;
+$isWordGame = in_array($assignment['game_mode'] ?? null, ['ahorcado', 'crucigrama'], true); // se juega solo, sin partida en vivo
+
+$wordAttempt = null;
+if ($isWordGame) {
+    $wStmt = $pdo->prepare('SELECT status, updated_at FROM word_game_attempts WHERE assignment_id = :aid AND student_id = :sid');
+    $wStmt->execute(['aid' => $assignmentId, 'sid' => $studentId]);
+    $wordAttempt = $wStmt->fetch() ?: null;
+}
 
 // Intentos de cuestionario ya usados (para mostrar cuántos le quedan)
 $quizAttemptsUsed = 0;
@@ -109,6 +117,12 @@ require __DIR__ . '/../includes/header.php';
                 Ver mi trabajo entregado
             </a>
         <?php endif; ?>
+        <?php if ($isWordGame): ?>
+            <a class="btn btn-secondary" href="word_game.php?assignment_id=<?= (int) $assignmentId ?>">Ver mi resultado</a>
+            <?php if ((int) $assignment['allow_repeat'] === 1 && !$isOverdue): ?>
+                <a class="btn" href="word_game.php?assignment_id=<?= (int) $assignmentId ?>">Intentar de nuevo</a>
+            <?php endif; ?>
+        <?php endif; ?>
         <?php if ($isQuiz): ?>
             <a class="btn btn-secondary" href="quiz_attempt.php?assignment_id=<?= (int) $assignmentId ?>&review=1">
                 Ver mi revisión
@@ -127,6 +141,21 @@ require __DIR__ . '/../includes/header.php';
         <a class="btn" href="<?= e(rtrim(APP_URL, '/')) ?>/editor/<?= e($editorUrlByType[$assignment['project_type']] ?? '') ?>?project_id=<?= (int) $project['id'] ?>">
             Abrir editor
         </a>
+    </div>
+<?php elseif ($isWordGame): ?>
+    <div class="card" style="text-align:center;">
+        <h2 style="margin-top:0;"><?= $wordAttempt ? '▶️ En curso' : '⏳ Pendiente' ?></h2>
+        <p class="text-muted">
+            Juégalo a tu propio ritmo: <strong>no hay cronómetro</strong> y tu avance se guarda solo, así que puedes
+            cerrar y continuar después. No hace falta esperar a que tu profesor inicie nada.
+        </p>
+        <?php if ($isOverdue): ?>
+            <p style="color:var(--color-danger);">La fecha de entrega ya venció.</p>
+        <?php else: ?>
+            <a class="btn" href="word_game.php?assignment_id=<?= (int) $assignmentId ?>">
+                <?= $wordAttempt ? 'Continuar' : ($assignment['game_mode'] === 'crucigrama' ? 'Comenzar crucigrama' : 'Comenzar ahorcado') ?>
+            </a>
+        <?php endif; ?>
     </div>
 <?php elseif ($isQuiz): ?>
     <div class="card" style="text-align:center;">

@@ -103,15 +103,14 @@ require __DIR__ . '/../includes/header.php';
 
 <div id="play-panel" class="card"><p class="text-muted" style="text-align:center;">Cargando...</p></div>
 
-<script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/wordgames.js"></script>
 <script>
 const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;
 const GAME_CODE = <?= json_encode($code) ?>;
 const CSRF_TOKEN = <?= json_encode(csrf_token()) ?>;
 let submitting = false;
 
-async function fetchState(full) {
-    const res = await fetch(`${AULA_APP_URL}/api/games/state.php?code=${GAME_CODE}&role=student${full ? '&full=1' : ''}`);
+async function fetchState() {
+    const res = await fetch(`${AULA_APP_URL}/api/games/state.php?code=${GAME_CODE}&role=student`);
     return res.json();
 }
 
@@ -131,26 +130,6 @@ async function sendAnswer(questionId, payload) {
 }
 
 function renderQuestion(g, q) {
-    if (q.type === 'palabra') {
-        return `
-            <p class="text-muted" style="text-align:center;">Palabra ${g.current_question_index + 1} de ${g.total_questions}</p>
-            <h2 style="text-align:center;">💡 ${WG.esc(q.statement)}</h2>
-            <div class="play-timer">${q.time_remaining}s</div>
-            <div id="hangman-box"></div>
-            <p class="text-muted" style="text-align:center; font-size:0.85rem;">Toca las letras (o usa tu teclado). Tienes ${q.hangman.max_lives} vidas.</p>
-        `;
-    }
-    if (q.type === 'crucigrama') {
-        return `
-            <h2 style="text-align:center; margin-bottom:4px;">🧩 Crucigrama</h2>
-            <p class="text-muted" style="text-align:center; margin-top:0;">Completa todas las palabras. Tu avance se guarda solo.</p>
-            <div class="play-timer">${q.time_remaining}s</div>
-            <div id="cw-root"><p class="text-muted" style="text-align:center;">Cargando crucigrama...</p></div>
-            <p class="text-muted" id="cw-save-status" style="text-align:center; font-size:0.85rem; min-height:1.2em;"></p>
-            <button class="btn" id="btn-send-cw" style="width:100%;">Enviar crucigrama</button>
-        `;
-    }
-
     const imageHtml = q.image_url ? `<img src="${q.image_url}" style="max-width:100%; max-height:220px; border-radius:8px; display:block; margin:10px auto;">` : '';
     const header = `
         <p class="text-muted" style="text-align:center;">Pregunta ${g.current_question_index + 1} de ${g.total_questions}</p>
@@ -275,118 +254,7 @@ function wireSapitoDrag(q) {
     frog.addEventListener('pointercancel', onRelease);
 }
 
-// ---------- AHORCADO ----------
-let currentHangman = null;
-
-function wireHangman(q) {
-    const state = { qid: q.id, hm: q.hangman, busy: false };
-    currentHangman = state;
-    const box = document.getElementById('hangman-box');
-
-    function draw() {
-        box.innerHTML = WG.hangmanBoardHtml(state.hm, { disabled: state.busy });
-        box.querySelectorAll('.wg-key').forEach(b => { b.onclick = () => state.guess(b.dataset.letter); });
-    }
-
-    state.guess = async function (letter) {
-        if (state.busy || state.hm.guessed.includes(letter) || currentHangman !== state) return;
-        state.busy = true;
-        draw();
-        try {
-            const res = await fetch(`${AULA_APP_URL}/api/games/hangman_guess.php`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code: GAME_CODE, question_id: state.qid, letter, csrf_token: CSRF_TOKEN }),
-            });
-            const data = await res.json();
-            if (data.success && data.hangman) {
-                state.hm = data.hangman;
-            } else if (data.expired) {
-                pollNow();
-                return;
-            }
-        } catch (e) {
-            console.error(e);
-        }
-        state.busy = false;
-        draw();
-        if (state.hm.done) pollNow(); // pasa enseguida a la pantalla de "palabra terminada"
-    };
-
-    draw();
-}
-
-document.addEventListener('keydown', (e) => {
-    if (!currentHangman || currentHangman.busy || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key.length !== 1) return;
-    const k = WG.normChar(e.key);
-    if (k) currentHangman.guess(k);
-});
-
-// ---------- CRUCIGRAMA ----------
-const crosswordCache = {};   // question_id -> { rows, cols, words, my_cells }
-let crosswordCtl = null;
-let crosswordSaveTimer = null;
-
-async function crosswordSave(qid, cells, final) {
-    const res = await fetch(`${AULA_APP_URL}/api/games/crossword_save.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        keepalive: !final,
-        body: JSON.stringify({ code: GAME_CODE, question_id: qid, cells, final: !!final, csrf_token: CSRF_TOKEN }),
-    });
-    return res.json();
-}
-
-function wireCrossword(q) {
-    const root = document.getElementById('cw-root');
-    const data = crosswordCache[q.id];
-    if (!root || !data) return;
-    const statusEl = document.getElementById('cw-save-status');
-    const sendBtn = document.getElementById('btn-send-cw');
-    let dirty = false;
-
-    async function flush() {
-        if (!dirty || !crosswordCtl) return;
-        dirty = false;
-        try {
-            const r = await crosswordSave(q.id, crosswordCtl.getCells(), false);
-            if (statusEl) statusEl.textContent = r.success ? 'Avance guardado ✓' : '';
-            if (r.expired) pollNow();
-        } catch (e) {
-            dirty = true;
-            if (statusEl) statusEl.textContent = 'Sin conexión: se reintentará...';
-        }
-    }
-
-    crosswordCtl = WG.mountCrossword(root, data, data.my_cells || {}, () => {
-        dirty = true;
-        if (statusEl) statusEl.textContent = 'Escribiendo...';
-        clearTimeout(crosswordSaveTimer);
-        crosswordSaveTimer = setTimeout(flush, 1200);
-    });
-
-    document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); });
-
-    sendBtn.onclick = async () => {
-        const cells = crosswordCtl.getCells();
-        const total = data.words.reduce((n, w) => n + w.length, 0); // referencia: casillas (con cruces cuentan doble)
-        if (Object.keys(cells).length === 0 && !confirm('Aún no has escrito nada. ¿Enviar de todas formas?')) return;
-        sendBtn.disabled = true;
-        crosswordCtl.setDisabled(true);
-        clearTimeout(crosswordSaveTimer);
-        try {
-            await crosswordSave(q.id, cells, true);
-        } catch (e) {
-            console.error(e);
-        }
-        pollNow();
-    };
-}
-
 function wireQuestionInteractions(q, g) {
-    if (q.type === 'palabra') { wireHangman(q); return; }
-    if (q.type === 'crucigrama') { wireCrossword(q); return; }
     if (g && g.game_mode === 'sapito' && q.type === 'multiple') {
         wireSapitoDrag(q);
         return;
@@ -468,18 +336,6 @@ function wireQuestionInteractions(q, g) {
 }
 
 function renderResultsFeedback(r) {
-    if (r.type === 'crucigrama') {
-        if (!r.my_result) return '<p class="text-muted" style="text-align:center;">No alcanzaste a participar.</p>';
-        const m = r.my_result;
-        const cls = m.correct_words === m.total_words ? 'alert-success' : 'alert-error';
-        return `<div class="alert ${cls}" style="text-align:center;">Acertaste ${m.correct_words} de ${m.total_words} palabras · +${m.points_awarded} pts</div>`;
-    }
-    if (r.type === 'palabra') {
-        if (!r.my_result) return '<p class="text-muted" style="text-align:center;">No alcanzaste a terminar la palabra.</p>';
-        return r.my_result.is_correct
-            ? `<div class="alert alert-success" style="text-align:center;">🎉 ¡La descubriste! +${r.my_result.points_awarded} pts</div>`
-            : '<div class="alert alert-error" style="text-align:center;">Te quedaste sin vidas 💀</div>';
-    }
     if (!r.my_result) {
         return '<p class="text-muted" style="text-align:center;">No alcanzaste a responder.</p>';
     }
@@ -493,13 +349,6 @@ function renderResultsFeedback(r) {
 }
 
 function renderResultsDetail(r) {
-    if (r.type === 'palabra') {
-        return `<p style="text-align:center; font-size:1.4rem; font-weight:800; letter-spacing:3px;">${WG.esc(r.correct_answer.toUpperCase())}</p>
-                <p class="text-muted" style="text-align:center;">La resolvieron ${r.solved_count} de ${r.finished_count} que terminaron.</p>`;
-    }
-    if (r.type === 'crucigrama') {
-        return WG.crosswordStaticHtml(r.crossword, 'solution', false);
-    }
     if (r.type === 'ordenar') {
         return `<p class="text-muted" style="text-align:center;">Orden correcto: ${r.correct_order.join(' → ')}</p>`;
     }
@@ -518,7 +367,6 @@ function render(data) {
     const panel = document.getElementById('play-panel');
     if (!data.success) {
         lastSig = null;
-        currentHangman = null;
         panel.innerHTML = `<div class="alert alert-error">${data.message}</div>`;
         return;
     }
@@ -542,8 +390,6 @@ function render(data) {
         return;
     }
     lastSig = sig;
-    currentHangman = null;
-    crosswordCtl = null;
 
     if (g.status === 'waiting') {
         panel.innerHTML = `
@@ -554,22 +400,12 @@ function render(data) {
     } else if (g.status === 'question') {
         const q = data.question;
         if (q.already_answered) {
-            if (q.type === 'palabra') {
-                panel.innerHTML = `
-                    <h2 style="text-align:center;">${q.hangman.solved ? '🎉 ¡Completaste la palabra!' : '💀 Te quedaste sin vidas'}</h2>
-                    ${WG.hangmanBoardHtml(q.hangman, { keyboard: false })}
-                    <p class="text-muted" style="text-align:center;">Esperando al resto de tus compañeros...</p>
-                    <div class="play-timer">${q.time_remaining}s</div>
-                `;
-            } else {
-                const title = q.type === 'crucigrama' ? '🧩 ¡Crucigrama enviado!'
-                    : (g.game_mode === 'sapito' ? '¡La rana saltó! 🐸' : '¡Respuesta enviada!');
-                panel.innerHTML = `
-                    <h2 style="text-align:center;">${title}</h2>
-                    <p class="text-muted" style="text-align:center;">Esperando al resto de tus compañeros...</p>
-                    <div class="play-timer">${q.time_remaining}s</div>
-                `;
-            }
+            const title = g.game_mode === 'sapito' ? '¡La rana saltó! 🐸' : '¡Respuesta enviada!';
+            panel.innerHTML = `
+                <h2 style="text-align:center;">${title}</h2>
+                <p class="text-muted" style="text-align:center;">Esperando al resto de tus compañeros...</p>
+                <div class="play-timer">${q.time_remaining}s</div>
+            `;
         } else {
             panel.innerHTML = renderQuestion(g, q);
             wireQuestionInteractions(q, g);
@@ -577,11 +413,11 @@ function render(data) {
     } else if (g.status === 'question_results') {
         const r = data.results;
         panel.innerHTML = `
-            <h2 style="text-align:center;">${r.type === 'crucigrama' ? '🧩 Crucigrama — resultados' : (r.type === 'palabra' ? '💡 ' + WG.esc(r.statement) : r.statement)}</h2>
+            <h2 style="text-align:center;">${r.statement}</h2>
             ${renderResultsFeedback(r)}
             ${renderResultsDetail(r)}
             ${r.explanation ? `<p class="text-muted" style="text-align:center;">${r.explanation}</p>` : ''}
-            <p class="text-muted" style="text-align:center;">Esperando ${r.type === 'crucigrama' ? 'al profesor...' : 'la siguiente pregunta...'}</p>
+            <p class="text-muted" style="text-align:center;">Esperando la siguiente pregunta...</p>
         `;
     } else if (g.status === 'finished') {
         panel.innerHTML = `
@@ -605,15 +441,6 @@ async function poll() {
     pollTimer = null;
     try {
         const data = await fetchState();
-
-        // El tablero del crucigrama solo se descarga una vez por pregunta (no cambia mientras se juega).
-        if (data.success && data.game.status === 'question' && data.question.type === 'crucigrama'
-            && !data.question.already_answered && !crosswordCache[data.question.id]) {
-            const full = await fetchState(true);
-            if (full.success && full.question && full.question.crossword) {
-                crosswordCache[data.question.id] = full.question.crossword;
-            }
-        }
 
         render(data);
         if (data.success && data.game.status === 'finished') {

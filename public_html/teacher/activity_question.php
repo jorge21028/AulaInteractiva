@@ -33,8 +33,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'update_question') {
         $statement = clean_string($_POST['statement'] ?? '');
-        $timeSeconds = max(5, (int) ($_POST['time_seconds'] ?? 20));
-        $points = max(10, (int) ($_POST['points'] ?? 100));
+        if ($question['type'] === 'palabra') {
+            // Juegos de palabras individuales: sin cronómetro ni puntos por palabra
+            $timeSeconds = (int) $question['time_seconds'];
+            $points = (int) $question['points'];
+        } else {
+            $timeSeconds = max(5, (int) ($_POST['time_seconds'] ?? 20));
+            $points = max(10, (int) ($_POST['points'] ?? 100));
+        }
         $explanation = clean_string($_POST['explanation'] ?? '');
 
         if ($statement === '') {
@@ -266,14 +272,18 @@ require __DIR__ . '/../includes/header.php';
             <label for="statement"><?= $question['type'] === 'palabra' ? 'Pista' : 'Pregunta' ?></label>
             <textarea id="statement" name="statement" rows="3" required><?= e($question['statement']) ?></textarea>
 
+            <?php if ($question['type'] !== 'palabra'): ?>
             <label for="time_seconds">Tiempo (segundos)</label>
             <input type="text" id="time_seconds" name="time_seconds" value="<?= (int) $question['time_seconds'] ?>">
 
             <label for="points">Puntos</label>
             <input type="text" id="points" name="points" value="<?= (int) $question['points'] ?>">
+            <?php endif; ?>
 
+<?php if ($question['type'] !== 'palabra'): ?>
             <label for="explanation">Explicación (se muestra después de responder)</label>
             <textarea id="explanation" name="explanation" rows="2"><?= e($question['explanation']) ?></textarea>
+<?php endif; ?>
 
             <button type="submit" class="btn">Guardar</button>
         </form>

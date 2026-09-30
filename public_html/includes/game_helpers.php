@@ -11,7 +11,7 @@ if (!defined('AULA_APP')) {
     exit('Acceso directo no permitido.');
 }
 
-require_once __DIR__ . '/word_games_helpers.php';
+require_once __DIR__ . '/word_games_helpers.php'; // etiquetas/iconos de modos y helpers de juegos de palabras
 
 /**
  * Busca una partida por código. Prioriza partidas no finalizadas
@@ -61,28 +61,6 @@ function activity_fetch_questions(PDO $pdo, int $activityId): array
         $q['options'] = $optStmt->fetchAll();
     }
     unset($q);
-
-    return $questions;
-}
-
-/**
- * Devuelve los "pasos" que recorre una partida. En casi todos los modos cada pregunta es un
- * paso; en el CRUCIGRAMA todo el tablero es un único paso (se resuelve completo a la vez, con
- * tiempo total = suma de los tiempos de las palabras). Todo el sistema de partidas (host_action,
- * state, auto-avance) usa esto en lugar de activity_fetch_questions().
- */
-function game_fetch_steps(PDO $pdo, int $activityId): array
-{
-    $stmt = $pdo->prepare('SELECT game_mode FROM activities WHERE id = :id');
-    $stmt->execute(['id' => $activityId]);
-    $mode = $stmt->fetch()['game_mode'] ?? 'trivia';
-
-    $questions = activity_fetch_questions($pdo, $activityId);
-
-    if ($mode === 'crucigrama') {
-        $step = crossword_build_step($questions);
-        return $step ? [$step] : [];
-    }
 
     return $questions;
 }
@@ -349,7 +327,6 @@ function question_type_label(string $type): string
         'relacionar' => 'Relacionar parejas',
         'completar' => 'Completar espacios',
         'palabra' => 'Palabra y pista',
-        'crucigrama' => 'Crucigrama',
         default => ucfirst($type),
     };
 }
@@ -371,13 +348,10 @@ function game_ranking(PDO $pdo, int $gameId): array
  */
 function game_answered_count(PDO $pdo, int $gameId, int $questionId): int
 {
-    // Las respuestas en borrador (ahorcado a medias, crucigrama sin enviar) no cuentan como respondidas.
     $stmt = $pdo->prepare(
-        'SELECT COUNT(*) AS total FROM game_answers
-         WHERE game_id = :game_id AND question_id = :question_id
-           AND (answer_data IS NULL OR answer_data NOT LIKE :draft)'
+        'SELECT COUNT(*) AS total FROM game_answers WHERE game_id = :game_id AND question_id = :question_id'
     );
-    $stmt->execute(['game_id' => $gameId, 'question_id' => $questionId, 'draft' => '{"done":0%']);
+    $stmt->execute(['game_id' => $gameId, 'question_id' => $questionId]);
     return (int) ($stmt->fetch()['total'] ?? 0);
 }
 

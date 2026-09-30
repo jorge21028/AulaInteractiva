@@ -109,11 +109,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 
 $rosterStmt = $pdo->prepare(
     'SELECT sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id, sub.quiz_attempt_id,
-        qa.tab_switches,
+        qa.tab_switches, wga.status AS wg_status, wga.correct_count AS wg_correct, wga.total_count AS wg_total,
         u.name AS student_name, u.email AS student_email
      FROM submissions sub
      INNER JOIN users u ON u.id = sub.student_id
      LEFT JOIN quiz_attempts qa ON qa.id = sub.quiz_attempt_id
+     LEFT JOIN word_game_attempts wga ON wga.assignment_id = sub.assignment_id AND wga.student_id = sub.student_id
      WHERE sub.assignment_id = :assignment_id
      ORDER BY u.name ASC'
 );
@@ -183,6 +184,9 @@ require __DIR__ . '/../includes/header.php';
                                     ✅ Completada
                                     <?= $r['completed_at'] ? '· ' . e(date('d/m/Y H:i', strtotime($r['completed_at']))) : '' ?>
                                     <?= $r['reviewed_at'] ? '· ajustada por el profesor' : '· calificación automática' ?>
+                                    <?= $r['wg_status'] === 'completed' ? '· ' . (int) $r['wg_correct'] . ' de ' . (int) $r['wg_total'] . ' palabras' : '' ?>
+                                <?php elseif ($r['wg_status'] === 'in_progress'): ?>
+                                    ▶️ En curso (todavía no termina)
                                 <?php else: ?>
                                     ⏳ Pendiente
                                 <?php endif; ?>

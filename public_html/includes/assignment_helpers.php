@@ -9,8 +9,6 @@ if (!defined('AULA_APP')) {
     exit('Acceso directo no permitido.');
 }
 
-require_once __DIR__ . '/game_helpers.php'; // también carga word_games_helpers.php (crucigrama / ahorcado)
-
 /**
  * Crea una asignación y la reparte automáticamente entre todos los
  * estudiantes actualmente inscritos en el curso de esa asignatura,
@@ -95,16 +93,9 @@ function assignment_sync_from_game(PDO $pdo, int $gameId): void
 
     $activityId = (int) $game['activity_id'];
 
-    $actStmt = $pdo->prepare('SELECT allow_repeat, game_mode FROM activities WHERE id = :id');
+    $actStmt = $pdo->prepare('SELECT allow_repeat FROM activities WHERE id = :id');
     $actStmt->execute(['id' => $activityId]);
-    $actRow = $actStmt->fetch();
-    $allowRepeat = (int) ($actRow['allow_repeat'] ?? 0) === 1;
-    $gameMode = $actRow['game_mode'] ?? 'trivia';
-
-    // Crucigrama: cerrar y calificar lo que los estudiantes llevaban escrito antes de calcular notas.
-    if ($gameMode === 'crucigrama') {
-        crossword_finalize_drafts($pdo, $game);
-    }
+    $allowRepeat = (int) ($actStmt->fetch()['allow_repeat'] ?? 0) === 1;
 
     $tqStmt = $pdo->prepare('SELECT COUNT(*) AS total FROM activity_questions WHERE activity_id = :activity_id');
     $tqStmt->execute(['activity_id' => $activityId]);
@@ -134,18 +125,13 @@ function assignment_sync_from_game(PDO $pdo, int $gameId): void
 
     foreach ($assignments as $assignment) {
         foreach ($players as $player) {
-            if ($gameMode === 'crucigrama') {
-                // Nota = palabras acertadas / palabras del crucigrama
-                $percentage = crossword_player_ratio($pdo, $gameId, (int) $player['id']);
-            } else {
-                $correctStmt = $pdo->prepare(
-                    'SELECT COUNT(*) AS total FROM game_answers WHERE game_id = :game_id AND player_id = :player_id AND is_correct = 1'
-                );
-                $correctStmt->execute(['game_id' => $gameId, 'player_id' => $player['id']]);
-                $correct = (int) ($correctStmt->fetch()['total'] ?? 0);
+            $correctStmt = $pdo->prepare(
+                'SELECT COUNT(*) AS total FROM game_answers WHERE game_id = :game_id AND player_id = :player_id AND is_correct = 1'
+            );
+            $correctStmt->execute(['game_id' => $gameId, 'player_id' => $player['id']]);
+            $correct = (int) ($correctStmt->fetch()['total'] ?? 0);
 
-                $percentage = $correct / $totalQuestions;
-            }
+            $percentage = $correct / $totalQuestions;
             $newScore = round($percentage * (int) $assignment['points'], 2);
 
             // Asegurar que exista una fila de entrega (por si el estudiante
