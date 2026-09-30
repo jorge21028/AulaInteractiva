@@ -75,26 +75,31 @@
 
     // ---------- AHORCADO ----------
     WG.hangmanSvg = function (livesLeft, maxLives) {
+        injectStyles();
         const wrong = Math.max(0, maxLives - livesLeft);
+        // Los trazos van como atributos propios del SVG para que se vean siempre, aunque falle el CSS.
+        const P = 'class="part" stroke="#DC2626" stroke-width="4" stroke-linecap="round" fill="none"';
+        const F = 'class="frame" stroke="#475569" stroke-width="5" stroke-linecap="round" fill="none"';
         const parts = [
-            '<circle class="part" cx="105" cy="52" r="15"/>',
-            '<line class="part" x1="105" y1="67" x2="105" y2="110"/>',
-            '<line class="part" x1="105" y1="78" x2="86" y2="98"/>',
-            '<line class="part" x1="105" y1="78" x2="124" y2="98"/>',
-            '<line class="part" x1="105" y1="110" x2="88" y2="140"/>',
-            '<line class="part" x1="105" y1="110" x2="122" y2="140"/>',
+            `<circle ${P} cx="105" cy="52" r="15"/>`,
+            `<line ${P} x1="105" y1="67" x2="105" y2="110"/>`,
+            `<line ${P} x1="105" y1="78" x2="86" y2="98"/>`,
+            `<line ${P} x1="105" y1="78" x2="124" y2="98"/>`,
+            `<line ${P} x1="105" y1="110" x2="88" y2="140"/>`,
+            `<line ${P} x1="105" y1="110" x2="122" y2="140"/>`,
         ];
-        return `<svg class="wg-gallows" viewBox="0 0 150 170" role="img" aria-label="Ahorcado: ${wrong} de ${maxLives} errores">
-            <line class="frame" x1="15" y1="160" x2="135" y2="160"/>
-            <line class="frame" x1="40" y1="160" x2="40" y2="15"/>
-            <line class="frame" x1="38" y1="18" x2="105" y2="18"/>
-            <line class="frame" x1="105" y1="18" x2="105" y2="37"/>
+        return `<svg class="wg-gallows" width="150" height="170" viewBox="0 0 150 170" role="img" aria-label="Ahorcado: ${wrong} de ${maxLives} errores">
+            <line ${F} x1="15" y1="160" x2="135" y2="160"/>
+            <line ${F} x1="40" y1="160" x2="40" y2="15"/>
+            <line ${F} x1="38" y1="18" x2="105" y2="18"/>
+            <line ${F} x1="105" y1="18" x2="105" y2="37"/>
             ${parts.slice(0, wrong).join('')}
         </svg>`;
     };
 
     /** pattern: arreglo de caracteres ('_' = letra oculta). */
     WG.hangmanWordHtml = function (pattern) {
+        injectStyles();
         return '<div class="wg-word">' + pattern.map(ch => {
             if (ch === '_') return '<div class="wg-letter">&nbsp;</div>';
             if (ch === ' ') return '<div class="wg-letter gap"></div>';
@@ -106,6 +111,7 @@
     WG.HANGMAN_KEYS = 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ'.split('');
 
     WG.hangmanKeyboardHtml = function (hm, disabledAll) {
+        injectStyles();
         return '<div class="wg-keyboard">' + WG.HANGMAN_KEYS.map(k => {
             const used = hm.guessed.includes(k);
             const bad = hm.wrong.includes(k);
@@ -115,6 +121,7 @@
     };
 
     WG.hangmanBoardHtml = function (hm, opts) {
+        injectStyles();
         opts = opts || {};
         const hearts = '❤️'.repeat(hm.lives_left) + '🖤'.repeat(hm.max_lives - hm.lives_left);
         return `
@@ -338,4 +345,5 @@
     };
 
     global.WG = WG;
+    if (document.head) injectStyles();
 })(window);
