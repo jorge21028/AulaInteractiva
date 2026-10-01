@@ -69,6 +69,61 @@ function project_default_data(string $type): array
 }
 
 /**
+ * ¿El trabajo (borrador) ya tiene contenido propio del estudiante, o sigue igual que la plantilla vacía?
+ * Se compara con la estructura inicial de cada tipo. IMPORTANTE: no se usa la hora de la última edición
+ * porque los editores autoguardan cada 20 s aunque el estudiante no haya escrito nada.
+ */
+function project_has_content(string $type, ?string $dataJson): bool
+{
+    $data = json_decode((string) $dataJson, true);
+    if (!is_array($data)) {
+        return false;
+    }
+
+    switch ($type) {
+        case 'resumen':
+            $html = (string) ($data['html'] ?? '');
+            $text = trim(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            $text = trim(str_replace("\xC2\xA0", ' ', $text)); // espacios duros
+            return $text !== '' || (bool) preg_match('/<(img|table|iframe|video|audio)\b/i', $html);
+
+        case 'tabla_comparativa':
+            $default = project_default_data('tabla_comparativa');
+            $columns = is_array($data['columns'] ?? null) ? $data['columns'] : [];
+            $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
+            if ($columns !== $default['columns'] || count($rows) > count($default['rows'])) {
+                return true;
+            }
+            foreach ($rows as $row) {
+                foreach ((array) $row as $cell) {
+                    if (trim((string) $cell) !== '') {
+                        return true;
+                    }
+                }
+            }
+            return false;
+
+        case 'infografia':
+        case 'mapa_mental':
+            return !empty($data['objects']);
+
+        case 'presentacion':
+            $slides = is_array($data['slides'] ?? null) ? $data['slides'] : [];
+            if (count($slides) > 1) {
+                return true;
+            }
+            foreach ($slides as $slide) {
+                if (!empty($slide['objects'])) {
+                    return true;
+                }
+            }
+            return false;
+    }
+
+    return $data !== project_default_data($type);
+}
+
+/**
  * Sanea recursivamente cualquier campo "html" dentro de la estructura de
  * un trabajo, antes de guardarlo. Ver sanitize_rich_html() en security.php.
  * Los campos de texto plano (celdas de tabla, encabezados) se guardan tal

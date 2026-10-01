@@ -110,16 +110,118 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 $rosterStmt = $pdo->prepare(
     'SELECT sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id, sub.quiz_attempt_id,
         qa.tab_switches, wga.status AS wg_status, wga.correct_count AS wg_correct, wga.total_count AS wg_total,
+        wga.state_json AS wg_state, wga.updated_at AS wg_updated_at,
+        sp.id AS draft_project_id, sp.status AS project_status, sp.type AS draft_type, sp.data_json AS draft_data,
+        sp.updated_at AS project_updated_at,
+        (SELECT qa2.started_at FROM quiz_attempts qa2
+          WHERE qa2.quiz_id = :quiz_a AND qa2.student_id = sub.student_id AND qa2.status = \'in_progress\'
+          ORDER BY qa2.id DESC LIMIT 1) AS quiz_open_started,
+        (SELECT qa2.expires_at FROM quiz_attempts qa2
+          WHERE qa2.quiz_id = :quiz_b AND qa2.student_id = sub.student_id AND qa2.status = \'in_progress\'
+          ORDER BY qa2.id DESC LIMIT 1) AS quiz_open_expires,
         u.name AS student_name, u.email AS student_email
      FROM submissions sub
      INNER JOIN users u ON u.id = sub.student_id
      LEFT JOIN quiz_attempts qa ON qa.id = sub.quiz_attempt_id
      LEFT JOIN word_game_attempts wga ON wga.assignment_id = sub.assignment_id AND wga.student_id = sub.student_id
+     LEFT JOIN student_projects sp ON sp.assignment_id = sub.assignment_id AND sp.student_id = sub.student_id
      WHERE sub.assignment_id = :assignment_id
      ORDER BY u.name ASC'
 );
-$rosterStmt->execute(['assignment_id' => $assignmentId]);
+$rosterStmt->execute([
+    'assignment_id' => $assignmentId,
+    'quiz_a' => $assignment['quiz_id'] ?? 0,
+    'quiz_b' => $assignment['quiz_id'] ?? 0,
+]);
 $roster = $rosterStmt->fetchAll();
+
+/** "hace 5 min", "hace 2 h" o la fecha si ya pasó más de un día. */
+function roster_time_ago(?string $datetime): string
+{
+    if (!$datetime) {
+        return '';
+    }
+    $diff = time() - strtotime($datetime);
+    if ($diff < 0) {
+        $diff = 0;
+    }
+    if ($diff < 60) {
+        return 'hace unos segundos';
+    }
+    if ($diff < 3600) {
+        return 'hace ' . (int) floor($diff / 60) . ' min';
+    }
+    if ($diff < 86400) {
+        return 'hace ' . (int) floor($diff / 3600) . ' h';
+    }
+    return 'el ' . date('d/m H:i', strtotime($datetime));
+}
+
+/**
+ * Estado de trabajo de cada estudiante, para ver de un vistazo quién está trabajando y quién no:
+ *   completed  = ya entregó
+ *   working    = ya tiene avance propio (escribió/dibujó, jugó, o tiene un cuestionario abierto)
+ *   opened     = abrió la tarea pero todavía no ha hecho nada
+ *   notstarted = ni siquiera la ha abierto
+ * Devuelve ['state', 'label', 'detail', 'link' (id de borrador a revisar o null)].
+ */
+function roster_progress(array $r, array $assignment): array
+{
+    if ($r['status'] === 'completed') {
+        return ['state' => 'completed', 'label' => '✅ Entregada', 'detail' => '', 'link' => null];
+    }
+
+    // --- Cuestionario ---
+    if (!empty($assignment['quiz_id'])) {
+        if ($r['quiz_open_started']) {
+            $expired = $r['quiz_open_expires'] && strtotime($r['quiz_open_expires']) < time();
+            return [
+                'state' => 'working',
+                'label' => $expired ? '📝 Intento abierto sin entregar' : '📝 Presentando el cuestionario',
+                'detail' => 'empezó ' . roster_time_ago($r['quiz_open_started']) . ($expired ? ' · el tiempo ya venció' : ''),
+                'link' => null,
+            ];
+        }
+        return ['state' => 'notstarted', 'label' => '⏳ No ha empezado', 'detail' => '', 'link' => null];
+    }
+
+    // --- Ahorcado / Crucigrama (individuales) ---
+    if (in_array($assignment['game_mode'] ?? null, ['ahorcado', 'crucigrama'], true)) {
+        if ($r['wg_status'] === 'in_progress') {
+            $st = json_decode((string) $r['wg_state'], true);
+            $hasProgress = is_array($st) && (!empty($st['w']) || !empty($st['cells']));
+            return $hasProgress
+                ? ['state' => 'working', 'label' => '▶️ Jugando', 'detail' => 'última actividad ' . roster_time_ago($r['wg_updated_at']), 'link' => null]
+                : ['state' => 'opened', 'label' => '👀 Abrió, aún no empieza', 'detail' => roster_time_ago($r['wg_updated_at']), 'link' => null];
+        }
+        return ['state' => 'notstarted', 'label' => '⏳ No ha empezado', 'detail' => '', 'link' => null];
+    }
+
+    // --- Trabajo de creación (resumen, tabla, infografía, mapa mental, presentación) ---
+    if (empty($assignment['activity_id']) && empty($assignment['quiz_id'])) {
+        if ($r['draft_project_id'] && $r['project_status'] !== 'submitted') {
+            if (project_has_content($r['draft_type'], $r['draft_data'])) {
+                return [
+                    'state' => 'working', 'label' => '✏️ Trabajando',
+                    'detail' => 'última edición ' . roster_time_ago($r['project_updated_at']),
+                    'link' => (int) $r['draft_project_id'],
+                ];
+            }
+            return ['state' => 'opened', 'label' => '👀 Abrió, aún no empieza', 'detail' => roster_time_ago($r['project_updated_at']), 'link' => null];
+        }
+        return ['state' => 'notstarted', 'label' => '⏳ No ha empezado', 'detail' => '', 'link' => null];
+    }
+
+    // --- Actividades en vivo (trivia / sapito): se juegan en la partida, no guardan avance ---
+    return ['state' => 'notstarted', 'label' => '⏳ Pendiente', 'detail' => '', 'link' => null];
+}
+
+$progressCounts = ['completed' => 0, 'working' => 0, 'opened' => 0, 'notstarted' => 0];
+foreach ($roster as $i => $row) {
+    $roster[$i]['progress'] = roster_progress($row, $assignment);
+    $progressCounts[$roster[$i]['progress']['state']]++;
+}
+$isLiveActivity = !empty($assignment['activity_id']) && !in_array($assignment['game_mode'] ?? null, ['ahorcado', 'crucigrama'], true);
 
 $pageTitle = $assignment['title'];
 require __DIR__ . '/../includes/header.php';
@@ -165,6 +267,26 @@ require __DIR__ . '/../includes/header.php';
     <?php if (empty($roster)): ?>
         <p class="empty-state">No hay estudiantes inscritos en esta asignatura todavía.</p>
     <?php else: ?>
+        <div id="progress-bar" style="display:flex; flex-wrap:wrap; gap:8px; margin:0 0 14px;">
+            <?php foreach ([
+                'all'        => ['Todos', count($roster), '#E2E8F0', '#334155'],
+                'working'    => ['✏️ Trabajando', $progressCounts['working'], '#FCD9A8', '#B45309'],
+                'opened'     => ['👀 Abrieron, sin empezar', $progressCounts['opened'], '#C7D2FE', '#4338CA'],
+                'notstarted' => ['⏳ Sin empezar', $progressCounts['notstarted'], '#E2E8F0', '#64748B'],
+                'completed'  => ['✅ Entregaron', $progressCounts['completed'], '#BBF7D0', '#166534'],
+            ] as $key => [$label, $count, $border, $color]): ?>
+                <button type="button" class="btn btn-secondary progress-filter" data-filter="<?= $key ?>"
+                        style="margin:0; padding:6px 12px; font-size:0.85rem; border:2px solid <?= $border ?>; color:<?= $color ?>;">
+                    <?= e($label) ?> <strong><?= (int) $count ?></strong>
+                </button>
+            <?php endforeach; ?>
+        </div>
+        <?php if ($isLiveActivity): ?>
+            <p class="text-muted" style="font-size:0.8rem; margin:-6px 0 12px;">
+                Esta actividad se juega en una partida en vivo: no guarda avance individual, así que verás "Pendiente" hasta que el estudiante juegue.
+            </p>
+        <?php endif; ?>
+
         <form method="post" action="assignment_detail.php?id=<?= (int) $assignmentId ?>" id="grades-form">
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="update_grades_bulk">
@@ -174,7 +296,7 @@ require __DIR__ . '/../includes/header.php';
                 $scoreValue = isset($postedOverride[$sid]) ? $postedOverride[$sid]['score'] : ($r['score'] !== null ? (string) $r['score'] : '');
                 $feedbackValue = isset($postedOverride[$sid]) ? $postedOverride[$sid]['feedback'] : ($r['feedback'] ?? '');
             ?>
-                <div class="card grade-row" style="margin-bottom:10px; padding:14px 16px;">
+                <div class="card grade-row" data-state="<?= e($r['progress']['state']) ?>" style="margin-bottom:10px; padding:14px 16px;">
                     <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                         <div>
                             <strong><?= e($r['student_name']) ?></strong>
@@ -185,14 +307,21 @@ require __DIR__ . '/../includes/header.php';
                                     <?= $r['completed_at'] ? '· ' . e(date('d/m/Y H:i', strtotime($r['completed_at']))) : '' ?>
                                     <?= $r['reviewed_at'] ? '· ajustada por el profesor' : '· calificación automática' ?>
                                     <?= $r['wg_status'] === 'completed' ? '· ' . (int) $r['wg_correct'] . ' de ' . (int) $r['wg_total'] . ' palabras' : '' ?>
-                                <?php elseif ($r['wg_status'] === 'in_progress'): ?>
-                                    ▶️ En curso (todavía no termina)
-                                <?php else: ?>
-                                    ⏳ Pendiente
+                                <?php else:
+                                    $pg = $r['progress'];
+                                    $badge = [
+                                        'working'    => 'background:#FFF4E5; color:#B45309; border:1px solid #FCD9A8;',
+                                        'opened'     => 'background:#EEF2FF; color:#4338CA; border:1px solid #C7D2FE;',
+                                        'notstarted' => 'background:#F1F5F9; color:#64748B; border:1px solid #E2E8F0;',
+                                    ][$pg['state']]; ?>
+                                    <span style="display:inline-block; padding:2px 10px; border-radius:999px; font-weight:600; <?= $badge ?>"><?= e($pg['label']) ?></span>
+                                    <?php if ($pg['detail'] !== ''): ?>· <?= e($pg['detail']) ?><?php endif; ?>
                                 <?php endif; ?>
                             </p>
                             <?php if ($r['project_id']): ?>
                                 <a href="view_project.php?id=<?= (int) $r['project_id'] ?>" style="font-size:0.85rem;">Ver trabajo entregado &rarr;</a>
+                            <?php elseif (!empty($r['progress']['link'])): ?>
+                                <a href="view_project.php?id=<?= (int) $r['progress']['link'] ?>" style="font-size:0.85rem;">Ver avance (borrador) &rarr;</a>
                             <?php endif; ?>
                             <?php if ($r['quiz_attempt_id']): ?>
                                 <a href="quiz_review.php?id=<?= (int) $r['quiz_attempt_id'] ?>" style="font-size:0.85rem;">Ver intento &rarr;</a>
@@ -252,6 +381,16 @@ require __DIR__ . '/../includes/header.php';
                 status.style.fontWeight = n === 0 ? '' : '600';
                 return n;
             }
+
+            // Filtro por estado de trabajo (solo oculta/muestra; no afecta lo que se guarda)
+            const filterButtons = document.querySelectorAll('.progress-filter');
+            function applyFilter(key) {
+                form.querySelectorAll('.grade-row').forEach(row => {
+                    row.style.display = (key === 'all' || row.dataset.state === key) ? '' : 'none';
+                });
+                filterButtons.forEach(b => { b.style.background = b.dataset.filter === key ? '#F1F5F9' : ''; });
+            }
+            filterButtons.forEach(b => b.addEventListener('click', () => applyFilter(b.dataset.filter)));
 
             form.addEventListener('input', refresh);
             form.addEventListener('submit', () => { submitting = true; });

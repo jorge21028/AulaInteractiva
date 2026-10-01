@@ -34,9 +34,14 @@ require __DIR__ . '/../includes/header.php';
 <p><a href="javascript:history.back()" class="no-print">&larr; Volver</a></p>
 <h1><?= e($project['title']) ?></h1>
 <p class="text-muted">
-    Entregado por <?= e($project['student_name']) ?>
-    <?php if ($project['submitted_at']): ?>
-        el <?= e(date('d/m/Y H:i', strtotime($project['submitted_at']))) ?>
+    <?php if ($project['status'] === 'submitted'): ?>
+        Entregado por <?= e($project['student_name']) ?>
+        <?php if ($project['submitted_at']): ?>
+            el <?= e(date('d/m/Y H:i', strtotime($project['submitted_at']))) ?>
+        <?php endif; ?>
+    <?php else: ?>
+        <strong>✏️ Borrador en progreso</strong> de <?= e($project['student_name']) ?> (todavía no lo ha entregado)
+        · última edición: <?= e(date('d/m/Y H:i', strtotime($project['updated_at']))) ?>
     <?php endif; ?>
 </p>
 
