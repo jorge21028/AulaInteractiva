@@ -22,12 +22,18 @@ if (!$assignment || $assignment['game_mode'] !== 'crucigrama') {
     json_response(['success' => false, 'message' => 'Actividad no encontrada.'], 404);
 }
 
-$layout = crossword_build_layout(activity_fetch_questions($pdo, (int) $assignment['activity_id']));
-if (empty($layout['words'])) {
+$bank = word_activity_words($pdo, (int) $assignment['activity_id']);
+if (empty($bank)) {
     json_response(['success' => false, 'message' => 'Este crucigrama todavía no tiene palabras.'], 400);
 }
 
+// Banco aleatorio: a cada estudiante (y en cada intento) le toca un subconjunto distinto del banco.
 $attempt = wga_ensure_attempt($pdo, $assignment, $studentId);
+$attempt = wga_ensure_selection($pdo, $assignment, $attempt, $bank);
+$layout = crossword_build_layout(wga_attempt_bank($bank, $attempt));
+if (empty($layout['words'])) {
+    json_response(['success' => false, 'message' => 'Este crucigrama todavía no tiene palabras que se crucen.'], 400);
+}
 
 /** Respuesta estándar con el estado actual del intento. */
 function cw_view(array $assignment, array $attempt, array $layout, array $extra = []): array
@@ -77,6 +83,8 @@ if ($action === 'restart') {
     }
     wga_restart($pdo, (int) $attempt['id']);
     $attempt = wga_ensure_attempt($pdo, $assignment, $studentId);
+    $attempt = wga_ensure_selection($pdo, $assignment, $attempt, $bank); // nuevo sorteo para el nuevo intento
+    $layout = crossword_build_layout(wga_attempt_bank($bank, $attempt));
     json_response(cw_view($assignment, $attempt, $layout));
 }
 
@@ -99,7 +107,9 @@ try {
         json_response(cw_view($assignment, $attempt, $layout, ['already_done' => true]));
     }
 
-    wga_save_state($pdo, (int) $attempt['id'], ['cells' => (object) $cells]);
+    $state = word_game_decode_answer($attempt['state_json']);
+    $state['cells'] = (object) $cells; // conserva "ids" (palabras sorteadas) y "last"
+    wga_save_state($pdo, (int) $attempt['id'], $state);
 
     if ($action === 'submit') {
         $grade = crossword_grade($layout, $cells);

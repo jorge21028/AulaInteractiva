@@ -6,8 +6,12 @@
  * (tabla word_game_attempts) y al terminar se califica la entrega automáticamente.
  *
  * Estado guardado en word_game_attempts.state_json:
- *   ahorcado:   {"w": {"<id_palabra>": {"g": ["A","B"], "done": 1, "solved": 1}}}
- *   crucigrama: {"cells": {"fila,columna": "LETRA"}}
+ *   ahorcado:   {"ids": [ids sorteados, en orden], "w": {"<id_palabra>": {"g": ["A","B"], "done": 1, "solved": 1}}}
+ *   crucigrama: {"ids": [ids sorteados], "cells": {"fila,columna": "LETRA"}}
+ *   "last": ids del intento anterior (para que el siguiente intento prefiera palabras distintas)
+ *
+ * BANCO ALEATORIO: si la actividad define words_per_attempt, cada estudiante recibe ESE número de palabras
+ * sorteadas del banco la primera vez que abre la actividad, y se sortea de nuevo en cada intento nuevo.
  * Calificación: palabras acertadas / total de palabras, escalado a los puntos de la asignación.
  */
 
@@ -23,7 +27,7 @@ function wga_load_assignment(PDO $pdo, int $assignmentId, int $studentId): ?arra
 {
     $stmt = $pdo->prepare(
         "SELECT a.id, a.title, a.description, a.points, a.due_date, a.subject_id,
-                act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, act.status AS activity_status,
+                act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, act.words_per_attempt, act.status AS activity_status,
                 sub.id AS submission_id, sub.status AS sub_status, sub.score AS sub_score, sub.feedback, sub.reviewed_at
          FROM assignments a
          INNER JOIN activities act ON act.id = a.activity_id
@@ -103,12 +107,163 @@ function wga_complete(PDO $pdo, array $assignment, int $attemptId, int $studentI
     return ['correct' => $correct, 'total' => $total, 'ratio' => $ratio, 'score' => $score, 'points' => $points];
 }
 
-/** Reinicia el intento (solo si la actividad permite repetir). La mejor nota se conserva en la entrega. */
+/**
+ * Reinicia el intento (solo si la actividad permite repetir). La mejor nota se conserva en la entrega.
+ * Se recuerdan las palabras del intento anterior ("last") para que el nuevo sorteo prefiera otras distintas.
+ */
 function wga_restart(PDO $pdo, int $attemptId): void
 {
+    $stmt = $pdo->prepare('SELECT state_json FROM word_game_attempts WHERE id = :id');
+    $stmt->execute(['id' => $attemptId]);
+    $old = word_game_decode_answer(($stmt->fetch()['state_json'] ?? null));
+    $last = array_values(array_map('intval', is_array($old['ids'] ?? null) ? $old['ids'] : []));
+    $newState = $last ? json_encode(['last' => $last]) : null;
+
     $pdo->prepare(
-        "UPDATE word_game_attempts SET status = 'in_progress', state_json = NULL, correct_count = 0, completed_at = NULL, updated_at = :now WHERE id = :id"
-    )->execute(['now' => now_datetime(), 'id' => $attemptId]);
+        "UPDATE word_game_attempts SET status = 'in_progress', state_json = :s, correct_count = 0, completed_at = NULL, updated_at = :now WHERE id = :id"
+    )->execute(['s' => $newState, 'now' => now_datetime(), 'id' => $attemptId]);
+}
+
+// ---------------------------------------------------------------------------
+// BANCO ALEATORIO: cada estudiante (y cada intento) recibe un subconjunto distinto
+// ---------------------------------------------------------------------------
+
+/**
+ * Interpreta el campo "palabras por estudiante" del profesor. Vacío = todas.
+ * Devuelve [valor|null, mensajeDeError|null].
+ */
+function wordbank_parse_limit(string $raw, string $mode): array
+{
+    $raw = trim($raw);
+    if ($raw === '') {
+        return [null, null];
+    }
+    if (!ctype_digit($raw) || (int) $raw <= 0) {
+        return [null, 'La cantidad de palabras por estudiante debe ser un número entero mayor que 0 (o déjalo vacío para usar todas).'];
+    }
+    $n = (int) $raw;
+    if ($n > 200) {
+        return [null, 'La cantidad de palabras por estudiante no puede pasar de 200.'];
+    }
+    if ($mode === 'crucigrama' && $n < 2) {
+        return [null, 'En el crucigrama cada estudiante necesita al menos 2 palabras (para que se crucen).'];
+    }
+    return [$n, null];
+}
+
+/** Cuántas palabras recibe cada estudiante, o null si recibe todas (sin banco aleatorio). */
+function wga_bank_limit(array $assignment, int $bankSize): ?int
+{
+    $n = (int) ($assignment['words_per_attempt'] ?? 0);
+    if ($n <= 0 || $n >= $bankSize) {
+        return null;
+    }
+    return $n;
+}
+
+/**
+ * Sortea $n palabras del banco. Prefiere las que NO salieron en el intento anterior ($avoid).
+ * En el crucigrama reintenta hasta lograr que todas las sorteadas se crucen entre sí en el tablero.
+ * $bank: [['id','clue','word'], ...]. Devuelve los ids elegidos.
+ */
+function wga_pick_ids(string $mode, array $bank, int $n, array $avoid): array
+{
+    $ids = array_map(fn($w) => (int) $w['id'], $bank);
+    $avoid = array_map('intval', $avoid);
+    $fresh = array_values(array_diff($ids, $avoid));
+    $old = array_values(array_intersect($ids, $avoid));
+
+    $draw = function () use ($fresh, $old, $n): array {
+        shuffle($fresh);
+        shuffle($old);
+        return array_slice(array_merge($fresh, $old), 0, $n);
+    };
+
+    if ($mode !== 'crucigrama') {
+        return $draw();
+    }
+
+    $byId = [];
+    foreach ($bank as $w) {
+        $byId[(int) $w['id']] = $w;
+    }
+
+    $best = null;
+    $bestCount = -1;
+    for ($try = 0; $try < 60; $try++) {
+        $cand = $draw();
+        $layout = crossword_build_layout(array_map(fn($id) => $byId[$id], $cand));
+        $placedIds = array_map(fn($w) => (int) $w['id'], $layout['words']);
+        if (count($placedIds) === count($cand)) {
+            return $cand; // todas se cruzan
+        }
+        if (count($placedIds) > $bestCount) {
+            $bestCount = count($placedIds);
+            $best = $placedIds; // si no se logra, se queda con la mejor combinación (solo palabras colocadas)
+        }
+    }
+    return $best ?: $draw();
+}
+
+/**
+ * Si la actividad usa banco aleatorio y este intento aún no tiene palabras sorteadas, las sortea y las guarda.
+ * Solo actúa sobre intentos recién abiertos (sin avance); los que ya tienen avance conservan sus palabras.
+ * Devuelve la fila del intento actualizada.
+ */
+function wga_ensure_selection(PDO $pdo, array $assignment, array $attempt, array $bank): array
+{
+    $n = wga_bank_limit($assignment, count($bank));
+    if ($n === null || $attempt['status'] !== 'in_progress') {
+        return $attempt;
+    }
+
+    $isFresh = function (array $st): bool {
+        return empty($st['ids']) && empty($st['w']) && empty($st['cells']);
+    };
+
+    if (!$isFresh(word_game_decode_answer($attempt['state_json']))) {
+        return $attempt;
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $row = wga_lock_attempt($pdo, (int) $attempt['id']);
+        $state = word_game_decode_answer($row['state_json']);
+        if ($row['status'] === 'in_progress' && $isFresh($state)) {
+            $state['ids'] = wga_pick_ids($assignment['game_mode'], $bank, $n, is_array($state['last'] ?? null) ? $state['last'] : []);
+            wga_save_state($pdo, (int) $row['id'], $state);
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM word_game_attempts WHERE id = :id');
+    $stmt->execute(['id' => $attempt['id']]);
+    return $stmt->fetch();
+}
+
+/** Palabras que le tocan a este intento: las sorteadas (en su orden) o, sin sorteo, todo el banco. */
+function wga_attempt_bank(array $bank, array $attempt): array
+{
+    $ids = word_game_decode_answer($attempt['state_json'])['ids'] ?? [];
+    if (!is_array($ids) || empty($ids)) {
+        return $bank;
+    }
+    $byId = [];
+    foreach ($bank as $w) {
+        $byId[(int) $w['id']] = $w;
+    }
+    $out = [];
+    foreach ($ids as $id) {
+        if (isset($byId[(int) $id])) {
+            $out[] = $byId[(int) $id];
+        }
+    }
+    return $out ?: $bank;
 }
 
 /** Lee el cuerpo JSON de la petición y valida CSRF + rol. Devuelve [$input, $studentId]. */

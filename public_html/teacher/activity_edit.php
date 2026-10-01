@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/game_helpers.php';
+require_once __DIR__ . '/../includes/word_play_helpers.php'; // sorteo del banco de palabras
 require_once __DIR__ . '/../includes/aiken_helpers.php';
 
 require_role('teacher');
@@ -63,6 +64,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $allowRepeat = isset($_POST['allow_repeat']) ? 1 : 0;
         $teamMode = isset($_POST['team_mode']) ? 1 : 0;
+        $wordsPerAttempt = null;
+        if ($isWordGame) {
+            [$wordsPerAttempt, $limitError] = wordbank_parse_limit((string) ($_POST['words_per_attempt'] ?? ''), $activity['game_mode']);
+            if ($limitError !== null) {
+                $errors[] = $limitError;
+            }
+        }
         $subjectId = (int) ($_POST['subject_id'] ?? $activity['subject_id']);
 
         $validSubject = false;
@@ -79,6 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = 'Dificultad inválida.';
         } elseif (!$validSubject) {
             $errors[] = 'Selecciona una asignatura válida.';
+        } elseif (!empty($errors)) {
+            // hay un error de validación (p. ej. cantidad de palabras): no se guarda nada
         } else {
             $stmt = $pdo->prepare(
                 'UPDATE activities SET title = :title, description = :description, instructions = :instructions,
@@ -95,6 +105,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'speed_bonus_max' => $speedBonusMax, 'ranking_enabled' => $rankingEnabled, 'allow_repeat' => $allowRepeat,
                 'team_mode' => $teamMode, 'updated_at' => now_datetime(), 'id' => $activityId, 'teacher_id' => $teacherId,
             ]);
+            if ($isWordGame) {
+                $pdo->prepare('UPDATE activities SET words_per_attempt = :n WHERE id = :id')
+                    ->execute(['n' => $wordsPerAttempt, 'id' => $activityId]);
+            }
             $notice = 'Datos guardados.';
             $activity = load_owned_activity($pdo, $activityId, $teacherId);
         }
@@ -196,6 +210,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 if ($isWordGame) {
                     $parsedWords = aiken_parse_words($content, $activity['game_mode']);
+                    [$newLimit, $limitError] = wordbank_parse_limit((string) ($_POST['words_per_attempt'] ?? ''), $activity['game_mode']);
+                    if ($limitError !== null) {
+                        $errors[] = $limitError . ' Se dejó la cantidad anterior.';
+                        $newLimit = $activity['words_per_attempt'] !== null ? (int) $activity['words_per_attempt'] : null;
+                    }
 
                     if (!empty($parsedWords['items'])) {
                         $res = aiken_import_words_into_activity(
@@ -203,6 +222,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             (int) $activity['time_per_question'], (int) $activity['points_base'], $activity['game_mode']
                         );
                         $notice = $res['inserted'] . ' palabra(s) importada(s) correctamente desde el archivo Aiken.';
+                        $pdo->prepare('UPDATE activities SET words_per_attempt = :n WHERE id = :id')
+                            ->execute(['n' => $newLimit, 'id' => $activityId]);
+                        $activity['words_per_attempt'] = $newLimit;
+                        $bankTotal = count(word_activity_words($pdo, $activityId));
+                        if ($newLimit !== null && $newLimit < $bankTotal) {
+                            $notice .= " Banco de {$bankTotal} palabras: cada estudiante recibirá {$newLimit} al azar (distintas en cada intento).";
+                        } elseif ($newLimit !== null) {
+                            $notice .= " Ojo: pediste {$newLimit} por estudiante pero el banco tiene {$bankTotal}; por ahora recibirán todas.";
+                        }
                         foreach ($res['skipped'] as $dup) {
                             $errors[] = 'La palabra "' . $dup . '" ya estaba en el crucigrama; se omitió.';
                         }
@@ -314,7 +342,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($activity['status'] === 'draft' && $totalQuestions === 0) {
             $errors[] = $isWordGame ? 'Agrega al menos una palabra antes de publicar.' : 'Agrega al menos una pregunta antes de publicar.';
         } elseif ($activity['status'] === 'draft' && $activity['game_mode'] === 'crucigrama'
-            && count(crossword_build_layout(activity_fetch_questions($pdo, $activityId))['words']) < 2) {
+            && count(crossword_build_layout(word_activity_words($pdo, $activityId))['words']) < 2) {
             $errors[] = 'Un crucigrama necesita al menos 2 palabras que se crucen entre sí. Agrega más palabras (con letras en común).';
         } else {
             $newStatus = $activity['status'] === 'draft' ? 'published' : 'draft';
@@ -412,6 +440,14 @@ require __DIR__ . '/../includes/header.php';
                 <input type="checkbox" name="allow_repeat" style="width:auto;" <?= $activity['allow_repeat'] ? 'checked' : '' ?>>
                 <?= $isWordGame ? 'Permitir que el estudiante repita la actividad (se conserva su mejor nota)' : 'Permitir repetir la partida' ?>
             </label>
+            <?php if ($isWordGame): ?>
+                <label for="words_per_attempt" style="margin-top:16px;">Palabras al azar por estudiante (vacío = todas)</label>
+                <input type="text" id="words_per_attempt" name="words_per_attempt" inputmode="numeric"
+                       value="<?= e((string) ($activity['words_per_attempt'] ?? '')) ?>" placeholder="Ej: 10">
+                <p class="text-muted" style="font-size:0.8rem; margin:4px 0 0;">
+                    Sube un banco grande de palabras y cada estudiante recibe esta cantidad sorteada del banco; en cada intento nuevo se sortean otras.
+                </p>
+            <?php endif; ?>
             <?php if (!$isWordGame): ?>
             <label style="display:flex; align-items:center; gap:8px;">
                 <input type="checkbox" name="team_mode" style="width:auto;" <?= $activity['team_mode'] ? 'checked' : '' ?>>
@@ -443,7 +479,20 @@ require __DIR__ . '/../includes/header.php';
     </section>
 
     <section class="card">
-        <h2 style="margin-top:0;"><?= $isWordGame ? 'Palabras' : 'Preguntas' ?> (<?= count($questions) ?>)</h2>
+        <h2 style="margin-top:0;"><?= $isWordGame ? 'Banco de palabras' : 'Preguntas' ?> (<?= count($questions) ?>)</h2>
+        <?php if ($isWordGame):
+            $bankLimit = wga_bank_limit($activity, count($questions));
+            $wpaRaw = (int) ($activity['words_per_attempt'] ?? 0); ?>
+            <p style="margin-top:-6px;">
+                <?php if ($bankLimit !== null): ?>
+                    🎲 Cada estudiante recibe <strong><?= (int) $bankLimit ?></strong> de estas <?= count($questions) ?> palabras al azar, y en cada intento nuevo le salen otras.
+                <?php elseif ($wpaRaw > 0): ?>
+                    <span class="text-muted">Configuraste <?= $wpaRaw ?> por estudiante, pero el banco tiene solo <?= count($questions) ?>: por ahora todos reciben todas. Agrega más palabras al banco para activar el sorteo.</span>
+                <?php else: ?>
+                    <span class="text-muted">Todos los estudiantes reciben todas las palabras. Para que a cada uno le salgan distintas, indica cuántas deben salir al azar (abajo, en los datos de la actividad o al importar el Aiken).</span>
+                <?php endif; ?>
+            </p>
+        <?php endif; ?>
 
         <?php if (!$isWordGame): ?>
         <div class="card" style="background:#F8FAFC; margin-bottom:16px;">
@@ -498,6 +547,13 @@ ANSWER: Fotosíntesis</pre>
                 <input type="hidden" name="action" value="import_aiken">
                 <label for="aiken_file">Archivo (.txt)</label>
                 <input type="file" id="aiken_file" name="aiken_file" accept=".txt,text/plain" required>
+
+                <label for="words_per_attempt_import">¿Cuántas palabras al azar le salen a cada estudiante? (vacío = todas)</label>
+                <input type="text" id="words_per_attempt_import" name="words_per_attempt" inputmode="numeric"
+                       value="<?= e((string) ($activity['words_per_attempt'] ?? '')) ?>" placeholder="Ej: 10" style="max-width:160px;">
+                <p class="text-muted" style="font-size:0.8rem; margin:4px 0 0;">
+                    Con un archivo de 40 palabras y "10", cada estudiante recibe 10 distintas, y en cada intento nuevo le salen otras.
+                </p>
                 <button type="submit" class="btn">Importar palabras</button>
             </form>
         </div>
@@ -572,16 +628,29 @@ ANSWER: Fotosíntesis</pre>
         <?php endif; ?>
 
         <?php if ($activity['game_mode'] === 'crucigrama' && !empty($questions)):
-            $cwLayout = crossword_build_layout($questions);
+            $cwBank = word_activity_words($pdo, $activityId);
+            $cwLimit = wga_bank_limit($activity, count($cwBank));
+            $cwSampleIds = $cwLimit !== null ? wga_pick_ids('crucigrama', $cwBank, $cwLimit, []) : null;
+            $cwItems = $cwBank;
+            if ($cwSampleIds !== null) {
+                $byIdPrev = [];
+                foreach ($cwBank as $bw) { $byIdPrev[(int) $bw['id']] = $bw; }
+                $cwItems = array_map(fn($id) => $byIdPrev[$id], $cwSampleIds);
+            }
+            $cwLayout = crossword_build_layout($cwItems);
             if (!empty($cwLayout['words'])): ?>
             <div class="card" style="background:#F8FAFC; margin-top:16px;">
-                <h3 style="margin-top:0;">Vista previa del tablero (con respuestas)</h3>
+                <h3 style="margin-top:0;"><?= $cwLimit !== null ? 'Ejemplo de tablero de un estudiante (con respuestas)' : 'Vista previa del tablero (con respuestas)' ?></h3>
                 <p class="text-muted" style="font-size:0.85rem; margin-top:-6px;">
                     <?= count($cwLayout['words']) ?> palabras colocadas · <?= (int) $cwLayout['rows'] ?> × <?= (int) $cwLayout['cols'] ?> casillas.
-                    El tablero es siempre el mismo para todos los estudiantes y cambia si agregas o quitas palabras.
+                    <?php if ($cwLimit !== null): ?>
+                        Es solo un ejemplo: cada estudiante recibe un tablero distinto, armado con palabras sorteadas del banco (recarga la página para ver otro).
+                    <?php else: ?>
+                        El tablero es siempre el mismo para todos los estudiantes y cambia si agregas o quitas palabras.
+                    <?php endif; ?>
                 </p>
                 <?= crossword_render_solution_html($cwLayout) ?>
-                <?php if (!empty($cwLayout['unplaced'])): ?>
+                <?php if ($cwLimit === null && !empty($cwLayout['unplaced'])): ?>
                     <div class="alert alert-error" style="font-size:0.85rem;">
                         No se pudieron cruzar con el resto (no comparten letras con las demás palabras) y <strong>no aparecerán</strong> en el juego:
                         <?php foreach ($cwLayout['unplaced'] as $up): ?>

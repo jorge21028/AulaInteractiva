@@ -23,12 +23,15 @@ if (!$assignment || $assignment['game_mode'] !== 'ahorcado') {
     json_response(['success' => false, 'message' => 'Actividad no encontrada.'], 404);
 }
 
-$words = word_activity_words($pdo, (int) $assignment['activity_id']);
-if (empty($words)) {
+$bank = word_activity_words($pdo, (int) $assignment['activity_id']);
+if (empty($bank)) {
     json_response(['success' => false, 'message' => 'Esta actividad todavía no tiene palabras.'], 400);
 }
 
+// Banco aleatorio: a cada estudiante (y en cada intento) le toca un subconjunto distinto del banco.
 $attempt = wga_ensure_attempt($pdo, $assignment, $studentId);
+$attempt = wga_ensure_selection($pdo, $assignment, $attempt, $bank);
+$words = wga_attempt_bank($bank, $attempt);
 
 if ($action === 'state') {
     json_response(wga_hangman_view($assignment, $attempt, $words, word_game_decode_answer($attempt['state_json'])));
@@ -43,7 +46,9 @@ if ($action === 'restart') {
     }
     wga_restart($pdo, (int) $attempt['id']);
     $attempt = wga_ensure_attempt($pdo, $assignment, $studentId);
-    json_response(wga_hangman_view($assignment, $attempt, $words, []));
+    $attempt = wga_ensure_selection($pdo, $assignment, $attempt, $bank); // nuevo sorteo para el nuevo intento
+    $words = wga_attempt_bank($bank, $attempt);
+    json_response(wga_hangman_view($assignment, $attempt, $words, word_game_decode_answer($attempt['state_json'])));
 }
 
 if ($action !== 'guess') {

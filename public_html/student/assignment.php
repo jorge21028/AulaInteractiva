@@ -2,6 +2,7 @@
 define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/word_play_helpers.php'; // límite de palabras por estudiante
 require_once __DIR__ . '/../includes/project_helpers.php';
 
 require_role('student');
@@ -11,7 +12,7 @@ $studentId = current_user_id();
 $assignmentId = (int) ($_GET['id'] ?? 0);
 
 $stmt = $pdo->prepare(
-    'SELECT a.*, act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, qz.id AS quiz_id, qz.title AS quiz_title,
+    'SELECT a.*, act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, act.words_per_attempt, qz.id AS quiz_id, qz.title AS quiz_title,
         qz.time_limit_minutes, qz.max_attempts, s.name AS subject_name,
         sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id
      FROM assignments a
@@ -39,6 +40,11 @@ if ($isWordGame) {
     $wStmt = $pdo->prepare('SELECT status, updated_at FROM word_game_attempts WHERE assignment_id = :aid AND student_id = :sid');
     $wStmt->execute(['aid' => $assignmentId, 'sid' => $studentId]);
     $wordAttempt = $wStmt->fetch() ?: null;
+
+    // Banco aleatorio: cuántas palabras le tocan a cada estudiante (si el profesor lo configuró)
+    $bankStmt = $pdo->prepare("SELECT COUNT(*) AS total FROM activity_questions WHERE activity_id = :id AND type = 'palabra'");
+    $bankStmt->execute(['id' => $assignment['activity_id']]);
+    $wordPerStudent = wga_bank_limit($assignment, (int) ($bankStmt->fetch()['total'] ?? 0));
 }
 
 // Intentos de cuestionario ya usados (para mostrar cuántos le quedan)
@@ -149,6 +155,9 @@ require __DIR__ . '/../includes/header.php';
             Juégalo a tu propio ritmo: <strong>no hay cronómetro</strong> y tu avance se guarda solo, así que puedes
             cerrar y continuar después. No hace falta esperar a que tu profesor inicie nada.
         </p>
+        <?php if (!empty($wordPerStudent)): ?>
+            <p class="text-muted">🎲 Te tocarán <strong><?= (int) $wordPerStudent ?> palabras</strong> al azar; a tus compañeros les tocan otras<?= (int) $assignment['allow_repeat'] === 1 ? ', y en cada intento nuevo te saldrán distintas' : '' ?>.</p>
+        <?php endif; ?>
         <?php if ($isOverdue): ?>
             <p style="color:var(--color-danger);">La fecha de entrega ya venció.</p>
         <?php else: ?>
