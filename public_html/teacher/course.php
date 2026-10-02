@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/course_helpers.php';
+require_once __DIR__ . '/../includes/space_helpers.php';
 
 require_role('teacher');
 
@@ -33,6 +34,7 @@ if (empty($course['enrollment_code'])) {
     $course['enrollment_code'] = $newCode;
 }
 
+$tab = in_array($_GET['tab'] ?? 'subjects', ['subjects', 'students', 'settings'], true) ? ($_GET['tab'] ?? 'subjects') : 'subjects';
 $errors = [];
 $notice = null;
 $resetInfo = null;
@@ -81,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $subjectId = (int) ($_POST['subject_id'] ?? 0);
 
         $usedStmt = $pdo->prepare(
-            '(SELECT COUNT(*) FROM activities WHERE subject_id = :sid1)
+            'SELECT (SELECT COUNT(*) FROM activities WHERE subject_id = :sid1)
              + (SELECT COUNT(*) FROM quizzes WHERE subject_id = :sid2)
              + (SELECT COUNT(*) FROM assignments WHERE subject_id = :sid3) AS total'
         );
@@ -176,21 +178,29 @@ $studStmt = $pdo->prepare(
 $studStmt->execute(['course_id' => $courseId]);
 $students = $studStmt->fetchAll();
 
+// Estado de cada asignatura (por calificar / entregas pendientes)
+$allRows = space_assignment_rows($pdo, $teacherId, $courseId);
+$subjectStats = space_summarize_by($allRows, 'subject_id');
+$courseSum = space_summarize($allRows);
+
 $pageTitle = $course['name'];
 require __DIR__ . '/../includes/header.php';
+$self = 'course.php?id=' . (int) $courseId;
 ?>
-<p><a href="dashboard.php">&larr; Volver a mis cursos</a></p>
-<h1><?= e($course['name']) ?></h1>
+<link rel="stylesheet" href="<?= e(rtrim(APP_URL, '/')) ?>/assets/css/spaces.css">
 
-<details style="margin-bottom:16px;">
-    <summary style="cursor:pointer; color:var(--color-primary);">✏️ Renombrar curso</summary>
-    <form method="post" action="course.php?id=<?= (int) $courseId ?>" style="max-width:420px; margin-top:10px;">
-        <?php csrf_field(); ?>
-        <input type="hidden" name="action" value="rename_course">
-        <input type="text" name="course_name" value="<?= e($course['name']) ?>" required>
-        <button type="submit" class="btn btn-secondary" style="margin-top:8px;">Guardar nombre</button>
-    </form>
-</details>
+<nav class="crumbs" aria-label="Ruta">
+    <a href="dashboard.php">Mis cursos</a><span class="sep">›</span>
+    <strong><?= e($course['name']) ?></strong>
+</nav>
+
+<div class="space-head">
+    <div>
+        <h1><?= e($course['name']) ?></h1>
+        <p class="space-sub">Código de matrícula: <strong style="letter-spacing:2px;"><?= e($course['enrollment_code']) ?></strong></p>
+    </div>
+    <a class="btn btn-secondary" href="assignments.php">➕ Nueva asignación</a>
+</div>
 
 <?php foreach ($errors as $error): ?>
     <div class="alert alert-error"><?= e($error) ?></div>
@@ -208,75 +218,86 @@ require __DIR__ . '/../includes/header.php';
     </div>
 <?php endif; ?>
 
-<section class="card" style="text-align:center; background:var(--gradient-brand-soft); border-color:var(--color-primary-light);">
-    <p class="text-muted" style="margin:0 0 6px;">Código de auto-matrícula — compártelo con tus estudiantes</p>
-    <div style="font-size:2.4rem; font-weight:800; letter-spacing:6px; color:var(--color-primary-dark);">
-        <?= e($course['enrollment_code']) ?>
+<div class="stat-row">
+    <div class="stat-pill"><div class="n"><?= count($subjects) ?></div><div class="l">Asignaturas</div></div>
+    <div class="stat-pill"><div class="n"><?= count($students) ?></div><div class="l">Estudiantes</div></div>
+    <div class="stat-pill red"><div class="n"><?= (int) $courseSum['needs_submissions'] ?></div><div class="l">Trabajos por corregir</div></div>
+    <div class="stat-pill amber"><div class="n"><?= (int) $courseSum['pending_submissions'] ?></div><div class="l">Entregas pendientes</div></div>
+</div>
+
+<div class="space-tabs">
+    <a class="space-tab <?= $tab === 'subjects' ? 'active' : '' ?>" href="<?= e($self) ?>">📚 Asignaturas <span class="count"><?= count($subjects) ?></span></a>
+    <a class="space-tab <?= $tab === 'students' ? 'active' : '' ?>" href="<?= e($self) ?>&tab=students">👥 Estudiantes <span class="count"><?= count($students) ?></span></a>
+    <a class="space-tab <?= $tab === 'settings' ? 'active' : '' ?>" href="<?= e($self) ?>&tab=settings">⚙️ Ajustes</a>
+</div>
+
+<?php if ($tab === 'subjects'): ?>
+    <div class="space-grid">
+        <?php foreach ($subjects as $sj):
+            $sid = (int) $sj['id'];
+            $ss = $subjectStats[$sid] ?? space_summarize([]);
+        ?>
+            <a class="space-tile" href="subject.php?id=<?= $sid ?>">
+                <div class="space-cover" style="background:<?= e(space_gradient($sid + 3)) ?>;">
+                    <span class="space-icon">📘</span>
+                    <?php if ($ss['needs_submissions'] > 0): ?>
+                        <span class="space-corner" style="background:#DC2626;"><?= (int) $ss['needs_submissions'] ?> por corregir</span>
+                    <?php endif; ?>
+                </div>
+                <div class="space-body">
+                    <h3><?= e($sj['name']) ?></h3>
+                    <p class="space-meta">
+                        <?= (int) $ss['assignments'] ?> <?= (int) $ss['assignments'] === 1 ? 'asignación' : 'asignaciones' ?>
+                        <?php if ($ss['pending_submissions'] > 0): ?> · <?= (int) $ss['pending_submissions'] ?> entrega(s) pendiente(s)<?php endif; ?>
+                    </p>
+                    <div class="chips"><?= space_status_chips($ss) ?></div>
+                </div>
+            </a>
+        <?php endforeach; ?>
+
+        <details class="space-tile space-new" <?= empty($subjects) ? 'open' : '' ?>>
+            <summary>＋ Nueva asignatura</summary>
+            <form method="post" action="<?= e($self) ?>" style="margin-top:12px;">
+                <?php csrf_field(); ?>
+                <input type="hidden" name="action" value="create_subject">
+                <label for="subject_name">Nombre de la asignatura</label>
+                <input type="text" id="subject_name" name="subject_name" placeholder="Ej: Informática" required>
+                <button type="submit" class="btn">Agregar asignatura</button>
+            </form>
+        </details>
     </div>
-    <p class="text-muted" style="font-size:0.85rem; margin-top:6px;">
-        El estudiante lo ingresa en "Unirme a una asignatura" desde su panel, y queda inscrito automáticamente
-        (sin que tengas que escribir su correo).
-    </p>
-    <form method="post" action="course.php?id=<?= (int) $courseId ?>" style="margin-top:12px;" onsubmit="return confirm('El código actual dejará de funcionar. ¿Generar uno nuevo?')">
-        <?php csrf_field(); ?>
-        <input type="hidden" name="action" value="regenerate_code">
-        <button type="submit" class="btn btn-secondary" style="margin:0;">Regenerar código</button>
-    </form>
-</section>
+    <?php if (empty($subjects)): ?>
+        <p class="text-muted">Este curso todavía no tiene asignaturas. Crea la primera con el mosaico de arriba.</p>
+    <?php endif; ?>
 
-<section class="grid grid-2" style="margin-top:16px;">
-    <div class="card">
-        <h2 style="margin-top:0;">Asignaturas</h2>
-        <?php if (empty($subjects)): ?>
-            <p class="empty-state">Sin asignaturas todavía.</p>
-        <?php else: ?>
-            <ul style="list-style:none; padding:0; margin:0;">
-                <?php foreach ($subjects as $s): ?>
-                    <li style="padding:8px 0; border-bottom:1px solid var(--color-border);">
-                        <details>
-                            <summary style="cursor:pointer;"><?= e($s['name']) ?></summary>
-                            <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                                <form method="post" action="course.php?id=<?= (int) $courseId ?>" style="display:flex; gap:6px;">
-                                    <?php csrf_field(); ?>
-                                    <input type="hidden" name="action" value="rename_subject">
-                                    <input type="hidden" name="subject_id" value="<?= (int) $s['id'] ?>">
-                                    <input type="text" name="subject_name_edit" value="<?= e($s['name']) ?>" style="padding:4px 8px; font-size:0.85rem;">
-                                    <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem;">Renombrar</button>
-                                </form>
-                                <form method="post" action="course.php?id=<?= (int) $courseId ?>"
-                                      onsubmit="return confirm('¿Eliminar la asignatura <?= e(addslashes($s['name'])) ?>? Solo se puede si no tiene actividades, cuestionarios ni asignaciones.')">
-                                    <?php csrf_field(); ?>
-                                    <input type="hidden" name="action" value="delete_subject">
-                                    <input type="hidden" name="subject_id" value="<?= (int) $s['id'] ?>">
-                                    <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem; color:#C0392B; border-color:#C0392B;">Eliminar</button>
-                                </form>
-                            </div>
-                        </details>
-                    </li>
-                <?php endforeach; ?>
-            </ul>
-        <?php endif; ?>
-
-        <form method="post" action="course.php?id=<?= (int) $courseId ?>" style="margin-top:16px;">
+<?php elseif ($tab === 'students'): ?>
+    <section class="card" style="text-align:center; background:var(--gradient-brand-soft); border-color:var(--color-primary-light);">
+        <p class="text-muted" style="margin:0 0 6px;">Código de auto-matrícula — compártelo con tus estudiantes</p>
+        <div style="font-size:2.4rem; font-weight:800; letter-spacing:6px; color:var(--color-primary-dark);">
+            <?= e($course['enrollment_code']) ?>
+        </div>
+        <p class="text-muted" style="font-size:0.85rem; margin-top:6px;">
+            El estudiante lo ingresa en "Unirme a una asignatura" desde su panel, y queda inscrito automáticamente
+            (sin que tengas que escribir su correo).
+        </p>
+        <form method="post" action="<?= e($self) ?>&tab=students" style="margin-top:12px;" onsubmit="return confirm('El código actual dejará de funcionar. ¿Generar uno nuevo?')">
             <?php csrf_field(); ?>
-            <input type="hidden" name="action" value="create_subject">
-            <label for="subject_name">Nueva asignatura</label>
-            <input type="text" id="subject_name" name="subject_name" placeholder="Ej: Informática" required>
-            <button type="submit" class="btn">Agregar asignatura</button>
+            <input type="hidden" name="action" value="regenerate_code">
+            <button type="submit" class="btn btn-secondary" style="margin:0;">Regenerar código</button>
         </form>
-    </div>
+    </section>
 
-    <div class="card">
+    <section class="card" style="margin-top:16px;">
         <h2 style="margin-top:0;">Estudiantes inscritos</h2>
         <?php if (empty($students)): ?>
             <p class="empty-state">Sin estudiantes todavía.</p>
         <?php else: ?>
             <ul style="list-style:none; padding:0; margin:0;">
                 <?php foreach ($students as $st): ?>
-                    <li style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--color-border);">
+                    <li style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 0; border-bottom:1px solid var(--color-border);">
                         <span><?= e($st['name']) ?> <span class="text-muted">(<?= e($st['email']) ?>)</span></span>
                         <span style="display:flex; gap:6px; flex-wrap:wrap;">
-                            <form method="post" action="course.php?id=<?= (int) $courseId ?>"
+                            <form method="post" action="<?= e($self) ?>&tab=students"
                                   onsubmit="return confirm('¿Restablecer la contraseña de <?= e(addslashes($st['name'])) ?>? Se generará una nueva contraseña temporal.')">
                                 <?php csrf_field(); ?>
                                 <input type="hidden" name="action" value="reset_student_password">
@@ -285,7 +306,7 @@ require __DIR__ . '/../includes/header.php';
                                     Restablecer contraseña
                                 </button>
                             </form>
-                            <form method="post" action="course.php?id=<?= (int) $courseId ?>"
+                            <form method="post" action="<?= e($self) ?>&tab=students"
                                   onsubmit="return confirm('¿Quitar a <?= e(addslashes($st['name'])) ?> de este curso? Se eliminarán sus tareas pendientes de este curso (se conserva lo ya calificado).')">
                                 <?php csrf_field(); ?>
                                 <input type="hidden" name="action" value="unenroll_student">
@@ -300,7 +321,7 @@ require __DIR__ . '/../includes/header.php';
             </ul>
         <?php endif; ?>
 
-        <form method="post" action="course.php?id=<?= (int) $courseId ?>" style="margin-top:16px;">
+        <form method="post" action="<?= e($self) ?>&tab=students" style="margin-top:16px; max-width:460px;">
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="enroll_student">
             <label for="student_email">Inscribir estudiante por correo (opcional)</label>
@@ -311,6 +332,48 @@ require __DIR__ . '/../includes/header.php';
             El estudiante debe haberse registrado previamente en Dynamic SGA con ese correo. También puede
             inscribirse solo con el código de arriba, sin que hagas nada aquí.
         </p>
-    </div>
-</section>
+    </section>
+
+<?php else: ?>
+    <section class="card">
+        <h2 style="margin-top:0;">Nombre del curso</h2>
+        <form method="post" action="<?= e($self) ?>&tab=settings" style="max-width:420px;">
+            <?php csrf_field(); ?>
+            <input type="hidden" name="action" value="rename_course">
+            <input type="text" name="course_name" value="<?= e($course['name']) ?>" required>
+            <button type="submit" class="btn btn-secondary" style="margin-top:8px;">Guardar nombre</button>
+        </form>
+    </section>
+
+    <section class="card" style="margin-top:16px;">
+        <h2 style="margin-top:0;">Asignaturas</h2>
+        <?php if (empty($subjects)): ?>
+            <p class="empty-state">Sin asignaturas todavía.</p>
+        <?php else: ?>
+            <ul style="list-style:none; padding:0; margin:0;">
+                <?php foreach ($subjects as $sj): ?>
+                    <li style="padding:10px 0; border-bottom:1px solid var(--color-border); display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between;">
+                        <a href="subject.php?id=<?= (int) $sj['id'] ?>" style="font-weight:600;"><?= e($sj['name']) ?></a>
+                        <span style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                            <form method="post" action="<?= e($self) ?>&tab=settings" style="display:flex; gap:6px;">
+                                <?php csrf_field(); ?>
+                                <input type="hidden" name="action" value="rename_subject">
+                                <input type="hidden" name="subject_id" value="<?= (int) $sj['id'] ?>">
+                                <input type="text" name="subject_name_edit" value="<?= e($sj['name']) ?>" style="padding:4px 8px; font-size:0.85rem;">
+                                <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem;">Renombrar</button>
+                            </form>
+                            <form method="post" action="<?= e($self) ?>&tab=settings"
+                                  onsubmit="return confirm('¿Eliminar la asignatura <?= e(addslashes($sj['name'])) ?>? Solo se puede si no tiene actividades, cuestionarios ni asignaciones.')">
+                                <?php csrf_field(); ?>
+                                <input type="hidden" name="action" value="delete_subject">
+                                <input type="hidden" name="subject_id" value="<?= (int) $sj['id'] ?>">
+                                <button type="submit" class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.8rem; color:#C0392B; border-color:#C0392B;">Eliminar</button>
+                            </form>
+                        </span>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
+    </section>
+<?php endif; ?>
 <?php require __DIR__ . '/../includes/footer.php'; ?>

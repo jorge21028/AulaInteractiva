@@ -5,38 +5,9 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/game_helpers.php'; // iconos de modos de juego
 require_once __DIR__ . '/../includes/assignment_helpers.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
+require_once __DIR__ . '/../includes/space_helpers.php';
 
 require_role('teacher');
-
-/**
- * Devuelve el HTML de una tarjeta de asignación para el listado agrupado.
- */
-function render_assignment_card(array $a): string
-{
-    ob_start();
-    ?>
-    <a class="card" href="assignment_detail.php?id=<?= (int) $a['id'] ?>" style="display:block;">
-        <h3 style="margin-top:0; font-size:1rem;"><?= e($a['title']) ?></h3>
-        <p class="text-muted" style="margin-bottom:4px; font-size:0.85rem;">
-            <?php if ($a['activity_title']): ?>
-                <?= e($a['activity_title']) ?>
-            <?php elseif ($a['quiz_title']): ?>
-                📝 <?= e($a['quiz_title']) ?>
-            <?php else: ?>
-                <?= e(PROJECT_TYPES[$a['project_type']] ?? 'Trabajo') ?>
-            <?php endif; ?>
-        </p>
-        <p class="text-muted" style="margin-bottom:0; font-size:0.85rem;">
-            <?= (int) $a['completed_count'] ?> / <?= (int) $a['total_students'] ?> completadas ·
-            <?= (int) $a['points'] ?> pts
-            <?php if ($a['due_date']): ?>
-                · Entrega: <?= e(date('d/m/Y', strtotime($a['due_date']))) ?>
-            <?php endif; ?>
-        </p>
-    </a>
-    <?php
-    return ob_get_clean();
-}
 
 $pdo = Database::getConnection();
 $teacherId = current_user_id();
@@ -44,7 +15,7 @@ $errors = [];
 
 // Asignaturas del profesor
 $subjStmt = $pdo->prepare(
-    'SELECT s.id, s.name, c.name AS course_name
+    'SELECT s.id, s.name, s.course_id, c.name AS course_name
      FROM subjects s
      INNER JOIN courses c ON c.id = s.course_id
      INNER JOIN teacher_courses tc ON tc.course_id = c.id
@@ -53,6 +24,15 @@ $subjStmt = $pdo->prepare(
 );
 $subjStmt->execute(['teacher_id' => $teacherId]);
 $subjects = $subjStmt->fetchAll();
+
+// Si se llega desde el espacio de una asignatura (?subject=ID), el formulario se prepara para ella.
+$preSubject = null;
+foreach ($subjects as $sj) {
+    if ((int) $sj['id'] === (int) ($_GET['subject'] ?? 0)) {
+        $preSubject = $sj;
+        break;
+    }
+}
 
 // Actividades publicadas del profesor (solo esas se pueden asignar)
 $actStmt = $pdo->prepare(
@@ -154,47 +134,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
     }
 }
 
-$listStmt = $pdo->prepare(
-    'SELECT a.id, a.title, a.due_date, a.points, a.project_type, a.subject_id, act.title AS activity_title, qz.title AS quiz_title,
-        s.name AS subject_name, s.course_id, c.name AS course_name,
-        (SELECT COUNT(*) FROM assignment_students ast WHERE ast.assignment_id = a.id) AS total_students,
-        (SELECT COUNT(*) FROM submissions sub WHERE sub.assignment_id = a.id AND sub.status = "completed") AS completed_count,
-        (SELECT COUNT(*) FROM submissions sub WHERE sub.assignment_id = a.id AND sub.status = "completed"
-            AND sub.project_id IS NOT NULL AND sub.reviewed_at IS NULL) AS needs_grading_count
-     FROM assignments a
-     LEFT JOIN activities act ON act.id = a.activity_id
-     LEFT JOIN quizzes qz ON qz.id = a.quiz_id
-     INNER JOIN subjects s ON s.id = a.subject_id
-     INNER JOIN courses c ON c.id = s.course_id
-     WHERE a.teacher_id = :teacher_id
-     ORDER BY c.name ASC, s.name ASC, a.created_at DESC'
-);
-$listStmt->execute(['teacher_id' => $teacherId]);
-$assignments = $listStmt->fetchAll();
-
-// Agrupadas por curso → asignatura → calificadas / no calificadas ("no
-// calificada" = tiene al menos un trabajo de creación entregado que todavía
-// no revisaste; las que se autocalifican solas —Trivia, Sapito, Cuestionario—
-// caen en "calificadas" apenas alguien las completa, porque no requieren tu acción).
-$coursesForList = []; // course_id => ['name' => ..., 'subjects' => [subject_id => ['name'=>.., 'items'=>['ungraded'=>[], 'graded'=>[]]]]]
-foreach ($assignments as $a) {
-    $cid = (int) $a['course_id'];
-    $sid = (int) $a['subject_id'];
-    if (!isset($coursesForList[$cid])) {
-        $coursesForList[$cid] = ['name' => $a['course_name'], 'subjects' => []];
-    }
-    if (!isset($coursesForList[$cid]['subjects'][$sid])) {
-        $coursesForList[$cid]['subjects'][$sid] = ['name' => $a['subject_name'], 'ungraded' => [], 'graded' => []];
-    }
-    $bucket = (int) $a['needs_grading_count'] > 0 ? 'ungraded' : 'graded';
-    $coursesForList[$cid]['subjects'][$sid][$bucket][] = $a;
+// Estado por curso (para los mosaicos de navegación al final de la página)
+$courseTiles = [];
+foreach ($subjects as $sj) {
+    $courseTiles[(int) $sj['course_id']] = $sj['course_name'];
 }
+$courseStats = space_summarize_by(space_assignment_rows($pdo, $teacherId), 'course_id');
 
-$pageTitle = 'Asignaciones';
+$pageTitle = 'Nueva asignación';
 require __DIR__ . '/../includes/header.php';
 ?>
-<p><a href="dashboard.php">&larr; Volver al panel</a></p>
-<h1>Asignaciones</h1>
+<link rel="stylesheet" href="<?= e(rtrim(APP_URL, '/')) ?>/assets/css/spaces.css">
+<?php if ($preSubject): ?>
+    <nav class="crumbs" aria-label="Ruta">
+        <a href="dashboard.php">Mis cursos</a><span class="sep">›</span>
+        <a href="course.php?id=<?= (int) $preSubject['course_id'] ?>"><?= e($preSubject['course_name']) ?></a><span class="sep">›</span>
+        <a href="subject.php?id=<?= (int) $preSubject['id'] ?>"><?= e($preSubject['name']) ?></a><span class="sep">›</span>
+        <strong>Nueva asignación</strong>
+    </nav>
+<?php else: ?>
+    <nav class="crumbs" aria-label="Ruta"><a href="dashboard.php">Mis cursos</a><span class="sep">›</span><strong>Nueva asignación</strong></nav>
+<?php endif; ?>
+<h1>Nueva asignación</h1>
+<?php if ($preSubject): ?>
+    <p class="space-sub" style="margin-top:-6px;">En <strong><?= e($preSubject['course_name']) ?> — <?= e($preSubject['name']) ?></strong>.
+        Solo se muestran las actividades y cuestionarios de esta asignatura. <a href="assignments.php">Ver todos</a></p>
+<?php endif; ?>
 
 <?php foreach ($errors as $error): ?>
     <div class="alert alert-error"><?= e($error) ?></div>
@@ -207,7 +172,6 @@ require __DIR__ . '/../includes/header.php';
     </div>
 <?php else: ?>
     <section class="card">
-        <h2 style="margin-top:0;">Nueva asignación</h2>
 
         <div style="display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap;">
             <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;">
@@ -230,28 +194,31 @@ require __DIR__ . '/../includes/header.php';
             <input type="hidden" name="mode" id="mode_field" value="interactive">
 
             <div id="mode-interactive">
-                <?php if (empty($activities)): ?>
-                    <p class="text-muted">No tienes actividades publicadas todavía. <a href="activities.php">Crea una</a>.</p>
+                <?php $activitiesShown = $preSubject ? array_values(array_filter($activities, fn($x) => (int) $x['subject_id'] === (int) $preSubject['id'])) : $activities; ?>
+                <?php if (empty($activitiesShown)): ?>
+                    <p class="text-muted">No tienes actividades publicadas<?= $preSubject ? ' en esta asignatura' : '' ?> todavía. <a href="activities.php">Crea una</a>.</p>
                 <?php else: ?>
                     <label for="activity_id">Actividad (debe estar publicada)</label>
                     <select id="activity_id" name="activity_id">
-                        <?php foreach ($activities as $a): ?>
+                        <?php foreach ($activitiesShown as $a): ?>
                             <option value="<?= (int) $a['id'] ?>"><?= e(game_mode_icon($a['game_mode'])) ?> <?= e($a['title']) ?></option>
                         <?php endforeach; ?>
                     </select>
                     <p class="text-muted" style="font-size:0.8rem;">
-                        Se juega en vivo: tú inicias la partida cuando quieras y la entrega se califica sola.
+                        Trivia y Sapito se juegan en vivo (tú inicias la partida). Ahorcado y Crucigrama los juegan los estudiantes
+                        a su ritmo, sin que inicies nada. En todos la entrega se califica sola.
                     </p>
                 <?php endif; ?>
             </div>
 
             <div id="mode-quiz" style="display:none;">
-                <?php if (empty($quizzes)): ?>
-                    <p class="text-muted">No tienes cuestionarios publicados todavía. <a href="quizzes.php">Crea uno</a>.</p>
+                <?php $quizzesShown = $preSubject ? array_values(array_filter($quizzes, fn($x) => (int) $x['subject_id'] === (int) $preSubject['id'])) : $quizzes; ?>
+                <?php if (empty($quizzesShown)): ?>
+                    <p class="text-muted">No tienes cuestionarios publicados<?= $preSubject ? ' en esta asignatura' : '' ?> todavía. <a href="quizzes.php">Crea uno</a>.</p>
                 <?php else: ?>
                     <label for="quiz_id">Cuestionario (debe estar publicado)</label>
                     <select id="quiz_id" name="quiz_id">
-                        <?php foreach ($quizzes as $q): ?>
+                        <?php foreach ($quizzesShown as $q): ?>
                             <option value="<?= (int) $q['id'] ?>">📝 <?= e($q['title']) ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -272,7 +239,7 @@ require __DIR__ . '/../includes/header.php';
                 <label for="subject_id_creation">Asignatura</label>
                 <select id="subject_id_creation" name="subject_id_creation">
                     <?php foreach ($subjects as $s): ?>
-                        <option value="<?= (int) $s['id'] ?>"><?= e($s['course_name']) ?> — <?= e($s['name']) ?></option>
+                        <option value="<?= (int) $s['id'] ?>" <?= ($preSubject && (int) $preSubject['id'] === (int) $s['id']) ? 'selected' : '' ?>><?= e($s['course_name']) ?> — <?= e($s['name']) ?></option>
                     <?php endforeach; ?>
                 </select>
                 <p class="text-muted" style="font-size:0.8rem;">
@@ -302,53 +269,26 @@ require __DIR__ . '/../includes/header.php';
         </form>
     </section>
 
-    <section class="card" style="margin-top:16px;">
-        <h2 style="margin-top:0;">Mis asignaciones</h2>
-        <?php if (empty($coursesForList)): ?>
-            <p class="empty-state">Aún no has creado asignaciones.</p>
-        <?php else: ?>
-            <?php foreach ($coursesForList as $courseGroup): ?>
-                <div style="margin-bottom:18px;">
-                    <h3 style="margin-bottom:8px;"><?= e($courseGroup['name']) ?></h3>
-                    <?php foreach ($courseGroup['subjects'] as $subjectGroup): ?>
-                        <?php $ungradedCount = count($subjectGroup['ungraded']); ?>
-                        <details style="margin-bottom:8px;" <?= $ungradedCount > 0 ? 'open' : '' ?>>
-                            <summary style="cursor:pointer; padding:6px 0; font-weight:600;">
-                                <?= e($subjectGroup['name']) ?>
-                                <?php if ($ungradedCount > 0): ?>
-                                    <span style="color:#C0392B; font-weight:400;"> — <?= $ungradedCount ?> por calificar</span>
-                                <?php else: ?>
-                                    <span class="text-muted" style="font-weight:400;"> — al día</span>
-                                <?php endif; ?>
-                            </summary>
-                            <div style="padding:6px 4px 4px;">
-                                <h4 style="margin-bottom:8px;">🔴 No calificadas (esperando tu revisión)</h4>
-                                <?php if (empty($subjectGroup['ungraded'])): ?>
-                                    <p class="empty-state" style="padding:6px 0; font-size:0.85rem;">Nada pendiente de calificar aquí.</p>
-                                <?php else: ?>
-                                    <div class="grid grid-2">
-                                        <?php foreach ($subjectGroup['ungraded'] as $a): ?>
-                                            <?= render_assignment_card($a) ?>
-                                        <?php endforeach; ?>
-                                    </div>
-                                <?php endif; ?>
-
-                                <h4 style="margin:14px 0 8px;">✅ Calificadas / sin pendientes</h4>
-                                <?php if (empty($subjectGroup['graded'])): ?>
-                                    <p class="empty-state" style="padding:6px 0; font-size:0.85rem;">Todavía no hay ninguna aquí.</p>
-                                <?php else: ?>
-                                    <div class="grid grid-2">
-                                        <?php foreach ($subjectGroup['graded'] as $a): ?>
-                                            <?= render_assignment_card($a) ?>
-                                        <?php endforeach; ?>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-                        </details>
-                    <?php endforeach; ?>
-                </div>
+    <section style="margin-top:24px;">
+        <h2 style="margin-bottom:4px;">Ver mis asignaciones</h2>
+        <p class="text-muted" style="margin-top:0;">Las asignaciones están organizadas por curso y asignatura: entra a un curso para ver su estado.</p>
+        <div class="space-grid">
+            <?php foreach ($courseTiles as $cid => $cname):
+                $cs = $courseStats[$cid] ?? space_summarize([]); ?>
+                <a class="space-tile" href="course.php?id=<?= (int) $cid ?>">
+                    <div class="space-cover" style="background:<?= e(space_gradient((int) $cid)) ?>; height:70px;">
+                        <span class="space-icon">🎓</span>
+                        <?php if ($cs['needs_submissions'] > 0): ?>
+                            <span class="space-corner" style="background:#DC2626;"><?= (int) $cs['needs_submissions'] ?> por corregir</span>
+                        <?php endif; ?>
+                    </div>
+                    <div class="space-body">
+                        <h3><?= e($cname) ?></h3>
+                        <div class="chips"><?= space_status_chips($cs) ?></div>
+                    </div>
+                </a>
             <?php endforeach; ?>
-        <?php endif; ?>
+        </div>
     </section>
 
     <script>

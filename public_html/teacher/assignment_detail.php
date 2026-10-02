@@ -226,7 +226,7 @@ $isLiveActivity = !empty($assignment['activity_id']) && !in_array($assignment['g
 $pageTitle = $assignment['title'];
 require __DIR__ . '/../includes/header.php';
 ?>
-<p><a href="assignments.php">&larr; Volver a asignaciones</a></p>
+<p><a href="subject.php?id=<?= (int) $assignment['subject_id'] ?>">&larr; Volver a la asignatura</a></p>
 <h1><?= e($assignment['title']) ?></h1>
 <p class="text-muted">
     <?= e($assignment['subject_name']) ?> ·

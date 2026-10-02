@@ -67,6 +67,32 @@ function course_enroll_student(PDO $pdo, int $courseId, int $studentId): array
 }
 
 /**
+ * Genera un código de auto-matrícula único (6 caracteres, sin letras/números confundibles como 0, O, 1, I).
+ * Lo usan teacher/course.php (primera visita del curso y "Regenerar código").
+ */
+if (!function_exists('generate_course_code')) {
+    function generate_course_code(PDO $pdo, int $length = 6): string
+    {
+        $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        $max = strlen($alphabet) - 1;
+        $check = $pdo->prepare('SELECT 1 FROM courses WHERE enrollment_code = :code LIMIT 1');
+
+        for ($attempt = 0; $attempt < 50; $attempt++) {
+            $code = '';
+            for ($i = 0; $i < $length; $i++) {
+                $code .= $alphabet[random_int(0, $max)];
+            }
+            $check->execute(['code' => $code]);
+            if (!$check->fetch()) {
+                return $code;
+            }
+        }
+        // Muy improbable: se alargan los intentos con un caracter más para evitar colisiones.
+        return generate_course_code($pdo, min($length + 1, 10));
+    }
+}
+
+/**
  * Busca un curso por su código de auto-matrícula.
  */
 function course_find_by_code(PDO $pdo, string $code): ?array

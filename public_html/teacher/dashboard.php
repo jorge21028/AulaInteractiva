@@ -2,6 +2,7 @@
 define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/space_helpers.php';
 
 require_role('teacher');
 
@@ -57,12 +58,15 @@ if ($totalCourses > 0) {
     $totalStudents = (int) ($stmt2->fetch()['total'] ?? 0);
 }
 
+// Estado de cada curso (por calificar / entregas pendientes) para su mosaico
+$courseStats = space_summarize_by(space_assignment_rows($pdo, $teacherId), 'course_id');
+
 $pageTitle = 'Panel del profesor';
 require __DIR__ . '/../includes/header.php';
 ?>
 <h1>Panel del profesor</h1>
 
-<p><a class="btn" href="activities.php">Actividades interactivas</a> <a class="btn btn-secondary" href="quizzes.php">📝 Cuestionarios</a> <a class="btn btn-secondary" href="assignments.php">Asignaciones</a> <a class="btn btn-secondary" href="statistics.php">Estadísticas</a></p>
+<p><a class="btn" href="activities.php">Actividades interactivas</a> <a class="btn btn-secondary" href="quizzes.php">📝 Cuestionarios</a> <a class="btn btn-secondary" href="assignments.php">➕ Nueva asignación</a> <a class="btn btn-secondary" href="statistics.php">Estadísticas</a></p>
 
 <section class="grid grid-3">
     <div class="card">
@@ -82,35 +86,53 @@ require __DIR__ . '/../includes/header.php';
     </div>
 </section>
 
-<section class="card" style="margin-top:24px;">
-    <h2 style="margin-top:0;">Mis cursos</h2>
+<link rel="stylesheet" href="<?= e(rtrim(APP_URL, '/')) ?>/assets/css/spaces.css">
+
+<section style="margin-top:24px;">
+    <h2 style="margin-bottom:4px;">Mis cursos</h2>
+    <p class="text-muted" style="margin-top:0;">Entra a un curso para ver sus asignaturas y el estado de cada asignación.</p>
 
     <?php foreach ($errors as $error): ?>
         <div class="alert alert-error"><?= e($error) ?></div>
     <?php endforeach; ?>
 
-    <?php if (empty($courses)): ?>
-        <p class="empty-state">Aún no tienes cursos. Crea el primero abajo.</p>
-    <?php else: ?>
-        <div class="grid grid-2">
-            <?php foreach ($courses as $course): ?>
-                <a class="card" href="course.php?id=<?= (int) $course['id'] ?>" style="display:block;">
-                    <h3 style="margin-top:0;"><?= e($course['name']) ?></h3>
-                    <p class="text-muted" style="margin-bottom:0;">
-                        <?= (int) $course['subjects_count'] ?> asignaturas ·
-                        <?= (int) $course['students_count'] ?> estudiantes
+    <div class="space-grid">
+        <?php foreach ($courses as $course):
+            $cid = (int) $course['id'];
+            $cs = $courseStats[$cid] ?? space_summarize([]);
+        ?>
+            <a class="space-tile" href="course.php?id=<?= $cid ?>">
+                <div class="space-cover" style="background:<?= e(space_gradient($cid)) ?>;">
+                    <span class="space-icon">🎓</span>
+                    <?php if ($cs['needs_submissions'] > 0): ?>
+                        <span class="space-corner" style="background:#DC2626;"><?= (int) $cs['needs_submissions'] ?> por corregir</span>
+                    <?php endif; ?>
+                </div>
+                <div class="space-body">
+                    <h3><?= e($course['name']) ?></h3>
+                    <p class="space-meta">
+                        <?= (int) $course['subjects_count'] ?> asignatura<?= (int) $course['subjects_count'] === 1 ? '' : 's' ?> ·
+                        <?= (int) $course['students_count'] ?> estudiante<?= (int) $course['students_count'] === 1 ? '' : 's' ?> ·
+                        <?= (int) $cs['assignments'] ?> <?= (int) $cs['assignments'] === 1 ? 'asignación' : 'asignaciones' ?>
                     </p>
-                </a>
-            <?php endforeach; ?>
-        </div>
-    <?php endif; ?>
+                    <div class="chips"><?= space_status_chips($cs) ?></div>
+                </div>
+            </a>
+        <?php endforeach; ?>
 
-    <form method="post" action="dashboard.php" style="margin-top:24px; max-width:420px;">
-        <?php csrf_field(); ?>
-        <input type="hidden" name="action" value="create_course">
-        <label for="course_name">Nuevo curso</label>
-        <input type="text" id="course_name" name="course_name" placeholder="Ej: 4to A" required>
-        <button type="submit" class="btn">Crear curso</button>
-    </form>
+        <details class="space-tile space-new" <?= empty($courses) || !empty($errors) ? 'open' : '' ?>>
+            <summary>＋ Nuevo curso</summary>
+            <form method="post" action="dashboard.php" style="margin-top:12px;">
+                <?php csrf_field(); ?>
+                <input type="hidden" name="action" value="create_course">
+                <label for="course_name">Nombre del curso</label>
+                <input type="text" id="course_name" name="course_name" placeholder="Ej: 4to A" required>
+                <button type="submit" class="btn">Crear curso</button>
+            </form>
+        </details>
+    </div>
+    <?php if (empty($courses)): ?>
+        <p class="text-muted">Aún no tienes cursos. Crea el primero con el mosaico de arriba.</p>
+    <?php endif; ?>
 </section>
 <?php require __DIR__ . '/../includes/footer.php'; ?>
