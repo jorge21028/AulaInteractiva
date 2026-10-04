@@ -39,6 +39,8 @@ $baseUrl = rtrim(APP_URL, '/');
                 <a href="<?= e($baseUrl) ?>/<?= e(dashboard_url_for_role(current_role())) ?>">Panel</a>
                 <?php if (current_role() === 'teacher'): ?>
                     <a href="<?= e($baseUrl) ?>/teacher/profile.php">Mi perfil</a>
+                <?php elseif (current_role() === 'student'): ?>
+                    <a href="<?= e($baseUrl) ?>/student/profile.php">Mi perfil</a>
                 <?php endif; ?>
                 <a href="<?= e($baseUrl) ?>/logout.php">Salir</a>
             <?php else: ?>

@@ -32,7 +32,7 @@ if (!empty($courses)) {
 
 // Todas las asignaciones de este estudiante, con su asignatura
 $allStmt = $pdo->prepare(
-    "SELECT a.id, a.title, a.due_date, a.points, a.subject_id, sub.status
+    "SELECT a.id, a.title, a.due_date, a.points, a.subject_id, sub.status, sub.returned_at
      FROM submissions sub
      INNER JOIN assignments a ON a.id = sub.assignment_id
      WHERE sub.student_id = :student_id
@@ -96,6 +96,9 @@ require __DIR__ . '/../includes/header.php';
                                 <?php foreach ($pending as $a): ?>
                                     <a class="card" href="assignment.php?id=<?= (int) $a['id'] ?>" style="display:block; margin-bottom:6px; padding:10px 14px;">
                                         <strong><?= e($a['title']) ?></strong>
+                                        <?php if (!empty($a['returned_at'])): ?>
+                                            <span style="display:inline-block; margin-left:6px; padding:1px 8px; border-radius:999px; font-size:0.75rem; font-weight:700; background:#FDECEC; color:#B91C1C; border:1px solid #F8C9C9;">↩️ Devuelta para corregir</span>
+                                        <?php endif; ?>
                                         <p class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">
                                             <?= (int) $a['points'] ?> pts
                                             <?php if ($a['due_date']): ?>

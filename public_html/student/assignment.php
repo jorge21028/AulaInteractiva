@@ -14,7 +14,7 @@ $assignmentId = (int) ($_GET['id'] ?? 0);
 $stmt = $pdo->prepare(
     'SELECT a.*, act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, act.words_per_attempt, qz.id AS quiz_id, qz.title AS quiz_title,
         qz.time_limit_minutes, qz.max_attempts, s.name AS subject_name,
-        sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id
+        sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id, sub.returned_at, sub.return_note
      FROM assignments a
      LEFT JOIN activities act ON act.id = a.activity_id
      LEFT JOIN quizzes qz ON qz.id = a.quiz_id
@@ -141,11 +141,21 @@ require __DIR__ . '/../includes/header.php';
         <?php endif; ?>
     </div>
 <?php elseif ($isCreation): ?>
+    <?php if (!empty($assignment['returned_at'])): ?>
+        <div class="alert alert-error" style="border:2px solid #F8C9C9;">
+            <strong>↩️ Tu profesor te devolvió este trabajo para que lo corrijas</strong>
+            <span class="text-muted" style="font-size:0.85rem;"> (<?= e(date('d/m/Y H:i', strtotime($assignment['returned_at']))) ?>)</span>
+            <?php if (!empty($assignment['return_note'])): ?>
+                <p style="margin:8px 0 0;">💬 <?= nl2br(e($assignment['return_note'])) ?></p>
+            <?php endif; ?>
+            <p style="margin:8px 0 0; font-size:0.9rem;">Tu trabajo sigue guardado: edítalo y vuelve a enviarlo cuando esté listo.</p>
+        </div>
+    <?php endif; ?>
     <div class="card" style="text-align:center;">
-        <h2 style="margin-top:0;">⏳ Pendiente</h2>
-        <p class="text-muted">Trabaja a tu ritmo. Puedes guardar tu avance y continuar más tarde.</p>
+        <h2 style="margin-top:0;"><?= !empty($assignment['returned_at']) ? '✏️ Por corregir' : '⏳ Pendiente' ?></h2>
+        <p class="text-muted"><?= !empty($assignment['returned_at']) ? 'Corrige lo que te indicó tu profesor y envíalo de nuevo.' : 'Trabaja a tu ritmo. Puedes guardar tu avance y continuar más tarde.' ?></p>
         <a class="btn" href="<?= e(rtrim(APP_URL, '/')) ?>/editor/<?= e($editorUrlByType[$assignment['project_type']] ?? '') ?>?project_id=<?= (int) $project['id'] ?>">
-            Abrir editor
+            <?= !empty($assignment['returned_at']) ? 'Abrir y corregir' : 'Abrir editor' ?>
         </a>
     </div>
 <?php elseif ($isWordGame): ?>

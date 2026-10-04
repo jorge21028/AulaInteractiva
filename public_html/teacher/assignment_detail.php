@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
+require_once __DIR__ . '/../includes/submission_admin_helpers.php';
 
 require_role('teacher');
 
@@ -29,6 +30,33 @@ if (!$assignment) {
 }
 
 $postedOverride = []; // valores enviados que no pasaron validación (para no perder lo escrito)
+
+// Acciones sobre la entrega de un estudiante: devolver para corregir / borrar la entrega
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['return_submission', 'delete_submission'], true)) {
+    csrf_verify($_POST['csrf_token'] ?? null);
+    $submissionId = (int) ($_POST['submission_id'] ?? 0);
+
+    if ($_POST['action'] === 'return_submission') {
+        [$okAction, $msgAction] = submission_return_to_student($pdo, $assignment, $submissionId, (string) ($_POST['note'] ?? ''));
+        if ($okAction) {
+            audit_log($pdo, $teacherId, 'submission_return', "Entrega #{$submissionId} de la asignación #{$assignmentId} devuelta");
+        }
+    } else {
+        if (($_POST['confirm'] ?? '') !== '1') {
+            [$okAction, $msgAction] = [false, 'Falta confirmar el borrado de la entrega.'];
+        } else {
+            [$okAction, $msgAction] = submission_delete_entry($pdo, $assignment, $submissionId);
+            if ($okAction) {
+                audit_log($pdo, $teacherId, 'submission_delete', "Entrega #{$submissionId} de la asignación #{$assignmentId} borrada");
+            }
+        }
+    }
+    if ($okAction) {
+        $notice = $msgAction;
+    } else {
+        $errors[] = $msgAction;
+    }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_grades_bulk') {
     csrf_verify($_POST['csrf_token'] ?? null);
@@ -111,6 +139,8 @@ $rosterStmt = $pdo->prepare(
     'SELECT sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id, sub.quiz_attempt_id,
         qa.tab_switches, wga.status AS wg_status, wga.correct_count AS wg_correct, wga.total_count AS wg_total,
         wga.state_json AS wg_state, wga.updated_at AS wg_updated_at,
+        sub.returned_at, sub.return_note,
+        (SELECT COUNT(*) FROM quiz_attempts qa3 WHERE qa3.assignment_id = sub.assignment_id AND qa3.student_id = sub.student_id) AS quiz_attempts_total,
         sp.id AS draft_project_id, sp.status AS project_status, sp.type AS draft_type, sp.data_json AS draft_data,
         sp.updated_at AS project_updated_at,
         (SELECT qa2.started_at FROM quiz_attempts qa2
@@ -199,6 +229,16 @@ function roster_progress(array $r, array $assignment): array
 
     // --- Trabajo de creación (resumen, tabla, infografía, mapa mental, presentación) ---
     if (empty($assignment['activity_id']) && empty($assignment['quiz_id'])) {
+        // Devuelto por el profesor y todavía sin reenviar
+        if (!empty($r['returned_at']) && $r['draft_project_id'] && $r['project_status'] !== 'submitted') {
+            $reopened = $r['project_updated_at'] && strtotime($r['project_updated_at']) > strtotime($r['returned_at']) + 2;
+            return [
+                'state' => 'returned', 'label' => '↩️ Devuelta para corregir',
+                'detail' => $reopened ? 'el estudiante ya abrió el editor (' . roster_time_ago($r['project_updated_at']) . ')'
+                                      : 'devuelta ' . roster_time_ago($r['returned_at']) . ' · esperando al estudiante',
+                'link' => (int) $r['draft_project_id'],
+            ];
+        }
         if ($r['draft_project_id'] && $r['project_status'] !== 'submitted') {
             if (project_has_content($r['draft_type'], $r['draft_data'])) {
                 return [
@@ -216,11 +256,16 @@ function roster_progress(array $r, array $assignment): array
     return ['state' => 'notstarted', 'label' => '⏳ Pendiente', 'detail' => '', 'link' => null];
 }
 
-$progressCounts = ['completed' => 0, 'working' => 0, 'opened' => 0, 'notstarted' => 0];
+$progressCounts = ['completed' => 0, 'returned' => 0, 'working' => 0, 'opened' => 0, 'notstarted' => 0];
 foreach ($roster as $i => $row) {
     $roster[$i]['progress'] = roster_progress($row, $assignment);
+    // ¿Hay algo que borrar? (entrega, trabajo, intentos de cuestionario o de juego)
+    $roster[$i]['has_data'] = $row['status'] === 'completed' || !empty($row['draft_project_id']) || !empty($row['wg_status'])
+        || !empty($row['quiz_open_started']) || (int) $row['quiz_attempts_total'] > 0 || !empty($row['project_id']) || !empty($row['quiz_attempt_id']);
+    $roster[$i]['can_return'] = $row['status'] === 'completed' && !empty($row['project_id']);
     $progressCounts[$roster[$i]['progress']['state']]++;
 }
+$isCreationAssignment = empty($assignment['activity_id']) && empty($assignment['quiz_id']);
 $isLiveActivity = !empty($assignment['activity_id']) && !in_array($assignment['game_mode'] ?? null, ['ahorcado', 'crucigrama'], true);
 
 $pageTitle = $assignment['title'];
@@ -270,11 +315,13 @@ require __DIR__ . '/../includes/header.php';
         <div id="progress-bar" style="display:flex; flex-wrap:wrap; gap:8px; margin:0 0 14px;">
             <?php foreach ([
                 'all'        => ['Todos', count($roster), '#E2E8F0', '#334155'],
+                'returned'   => ['↩️ Devueltas', $progressCounts['returned'], '#F8C9C9', '#B91C1C'],
                 'working'    => ['✏️ Trabajando', $progressCounts['working'], '#FCD9A8', '#B45309'],
                 'opened'     => ['👀 Abrieron, sin empezar', $progressCounts['opened'], '#C7D2FE', '#4338CA'],
                 'notstarted' => ['⏳ Sin empezar', $progressCounts['notstarted'], '#E2E8F0', '#64748B'],
                 'completed'  => ['✅ Entregaron', $progressCounts['completed'], '#BBF7D0', '#166534'],
-            ] as $key => [$label, $count, $border, $color]): ?>
+            ] as $key => [$label, $count, $border, $color]):
+                if ($key === 'returned' && $count === 0) { continue; } ?>
                 <button type="button" class="btn btn-secondary progress-filter" data-filter="<?= $key ?>"
                         style="margin:0; padding:6px 12px; font-size:0.85rem; border:2px solid <?= $border ?>; color:<?= $color ?>;">
                     <?= e($label) ?> <strong><?= (int) $count ?></strong>
@@ -310,6 +357,7 @@ require __DIR__ . '/../includes/header.php';
                                 <?php else:
                                     $pg = $r['progress'];
                                     $badge = [
+                                        'returned'   => 'background:#FDECEC; color:#B91C1C; border:1px solid #F8C9C9;',
                                         'working'    => 'background:#FFF4E5; color:#B45309; border:1px solid #FCD9A8;',
                                         'opened'     => 'background:#EEF2FF; color:#4338CA; border:1px solid #C7D2FE;',
                                         'notstarted' => 'background:#F1F5F9; color:#64748B; border:1px solid #E2E8F0;',
@@ -333,6 +381,26 @@ require __DIR__ . '/../includes/header.php';
                             <?php endif; ?>
                         </div>
                     </div>
+
+                    <?php if ($r['can_return'] || $r['has_data']): ?>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+                            <?php if ($r['can_return']): ?>
+                                <button type="button" class="btn btn-secondary btn-return" style="margin:0; padding:5px 12px; font-size:0.85rem;"
+                                        data-submission="<?= $sid ?>" data-student="<?= e($r['student_name']) ?>">
+                                    ↩️ Devolver para corregir
+                                </button>
+                            <?php endif; ?>
+                            <?php if ($r['has_data']): ?>
+                                <button type="button" class="btn btn-secondary btn-delete" style="margin:0; padding:5px 12px; font-size:0.85rem; color:#C0392B; border-color:#C0392B;"
+                                        data-submission="<?= $sid ?>" data-student="<?= e($r['student_name']) ?>">
+                                    🗑️ Borrar entrega
+                                </button>
+                            <?php endif; ?>
+                        </div>
+                        <?php if (!empty($r['returned_at']) && !empty($r['return_note'])): ?>
+                            <p class="text-muted" style="font-size:0.8rem; margin:6px 0 0;">Motivo de la devolución: <?= e($r['return_note']) ?></p>
+                        <?php endif; ?>
+                    <?php endif; ?>
 
                     <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-top:10px;">
                         <div>
@@ -406,4 +474,58 @@ require __DIR__ . '/../includes/header.php';
         </script>
     <?php endif; ?>
 </section>
+<form method="post" action="assignment_detail.php?id=<?= (int) $assignmentId ?>" id="return-form" style="display:none;">
+    <?php csrf_field(); ?>
+    <input type="hidden" name="action" value="return_submission">
+    <input type="hidden" name="submission_id" id="return-submission-id" value="">
+    <input type="hidden" name="note" id="return-note-hidden" value="">
+</form>
+<form method="post" action="assignment_detail.php?id=<?= (int) $assignmentId ?>" id="delete-form" style="display:none;">
+    <?php csrf_field(); ?>
+    <input type="hidden" name="action" value="delete_submission">
+    <input type="hidden" name="submission_id" id="delete-submission-id" value="">
+    <input type="hidden" name="confirm" value="1">
+</form>
+
+<dialog id="return-dialog" style="border:none; border-radius:14px; padding:22px; max-width:480px; width:calc(100% - 32px); box-shadow:0 20px 60px rgba(0,0,0,0.35);">
+    <h2 style="margin-top:0;">↩️ Devolver trabajo</h2>
+    <p class="text-muted" id="return-dialog-student" style="margin-top:-6px;"></p>
+    <p style="font-size:0.9rem;">El trabajo vuelve a ser un borrador: <strong>conserva todo lo que hizo</strong>, podrá editarlo y volver a enviarlo. Se quita la calificación actual.</p>
+    <label for="return-note">¿Qué debe corregir? (el estudiante lo verá)</label>
+    <textarea id="return-note" rows="4" maxlength="1000" placeholder="Ej: Falta explicar la segunda parte y agregar la conclusión."></textarea>
+    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+        <button type="button" class="btn btn-secondary" id="return-cancel" style="margin:0;">Cancelar</button>
+        <button type="button" class="btn" id="return-confirm" style="margin:0;">Devolver al estudiante</button>
+    </div>
+</dialog>
+
+<script>
+(function () {
+    const dlg = document.getElementById('return-dialog');
+    let pendingId = null;
+
+    document.querySelectorAll('.btn-return').forEach(b => b.addEventListener('click', () => {
+        pendingId = b.dataset.submission;
+        document.getElementById('return-dialog-student').textContent = 'Estudiante: ' + b.dataset.student;
+        document.getElementById('return-note').value = '';
+        dlg.showModal();
+    }));
+    document.getElementById('return-cancel').addEventListener('click', () => dlg.close());
+    document.getElementById('return-confirm').addEventListener('click', () => {
+        document.getElementById('return-submission-id').value = pendingId;
+        document.getElementById('return-note-hidden').value = document.getElementById('return-note').value;
+        dlg.close();
+        document.getElementById('return-form').submit();
+    });
+
+    document.querySelectorAll('.btn-delete').forEach(b => b.addEventListener('click', () => {
+        const ok = confirm('¿Borrar la entrega de ' + b.dataset.student + '?\n\n' +
+            'Se elimina TODO lo que hizo en esta asignación (trabajo, intentos y calificación) y podrá hacerla desde cero. ' +
+            'Esta acción no se puede deshacer.');
+        if (!ok) return;
+        document.getElementById('delete-submission-id').value = b.dataset.submission;
+        document.getElementById('delete-form').submit();
+    }));
+})();
+</script>
 <?php require __DIR__ . '/../includes/footer.php'; ?>

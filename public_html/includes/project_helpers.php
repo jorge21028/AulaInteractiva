@@ -299,8 +299,10 @@ function project_submit(PDO $pdo, int $projectId, int $studentId): bool
             if ($submission) {
                 // No pisar una calificación que el profesor ya ajustó manualmente.
                 if ($submission['reviewed_at'] === null) {
+                    // Al reenviar un trabajo devuelto, deja de estar "devuelto".
                     $pdo->prepare(
-                        "UPDATE submissions SET status = 'completed', project_id = :pid, completed_at = :now WHERE id = :id"
+                        "UPDATE submissions SET status = 'completed', project_id = :pid, completed_at = :now,
+                                returned_at = NULL, return_note = NULL WHERE id = :id"
                     )->execute(['pid' => $projectId, 'now' => now_datetime(), 'id' => $submission['id']]);
                 } else {
                     $pdo->prepare('UPDATE submissions SET project_id = :pid WHERE id = :id')
