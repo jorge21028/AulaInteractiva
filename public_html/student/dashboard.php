@@ -47,6 +47,25 @@ foreach ($allStmt->fetchAll() as $a) {
     $assignmentsBySubject[$a['subject_id']][$bucket][] = $a;
 }
 
+// Cuántos archivos publicó el profesor en cada asignatura (para mostrar el enlace "Archivos")
+$filesBySubject = [];
+if (!empty($courses)) {
+    $fids = array_column($courses, 'course_id');
+    $fin = implode(',', array_fill(0, count($fids), '?'));
+    $fStmt = $pdo->prepare(
+        "SELECT fo.subject_id, COUNT(sf.id) AS files_count
+         FROM subject_folders fo
+         INNER JOIN subjects s ON s.id = fo.subject_id
+         LEFT JOIN subject_files sf ON sf.folder_id = fo.id
+         WHERE s.course_id IN ($fin)
+         GROUP BY fo.subject_id"
+    );
+    $fStmt->execute($fids);
+    foreach ($fStmt->fetchAll() as $fr) {
+        $filesBySubject[(int) $fr['subject_id']] = (int) $fr['files_count'];
+    }
+}
+
 $pageTitle = 'Panel del estudiante';
 require __DIR__ . '/../includes/header.php';
 ?>
@@ -89,6 +108,11 @@ require __DIR__ . '/../includes/header.php';
                         </summary>
 
                         <div style="padding:8px 4px 4px;">
+                            <?php $fileCount = $filesBySubject[(int) $subj['id']] ?? 0; ?>
+                            <?php if ($fileCount > 0): ?>
+                                <a class="btn btn-secondary" style="margin:0 0 8px; padding:6px 14px; font-size:0.85rem;"
+                                   href="materials.php?subject=<?= (int) $subj['id'] ?>">📁 Archivos de la asignatura (<?= $fileCount ?>)</a>
+                            <?php endif; ?>
                             <h4 style="margin-bottom:8px;">⏳ Pendientes</h4>
                             <?php if (empty($pending)): ?>
                                 <p class="empty-state" style="padding:8px 0; font-size:0.85rem;">Sin actividades pendientes en esta asignatura.</p>

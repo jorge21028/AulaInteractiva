@@ -28,6 +28,8 @@ $data = json_decode($project['data_json'], true) ?: project_default_data('presen
 if (empty($data['slides'])) {
     $data = project_default_data('presentacion');
 }
+// Trabajos guardados con URL absoluta: se pasan a ruta local para que la imagen cargue en cualquier dirección del sitio.
+$data = project_localize_data($data, 'presentacion');
 $isSubmitted = $project['status'] === 'submitted';
 
 $pageTitle = $project['title'];
@@ -133,6 +135,7 @@ require __DIR__ . '/../includes/header.php';
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+<script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/image_upload.js"></script>
 <script>
 const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;
 const PROJECT_ID = <?= (int) $project['id'] ?>;
@@ -250,27 +253,28 @@ if (!IS_SUBMITTED) {
     document.getElementById('btn-upload-image').addEventListener('click', () => document.getElementById('file-image').click());
     document.getElementById('file-image').addEventListener('change', async (e) => {
         const file = e.target.files[0];
-        if (!file) return;
-        const formData = new FormData();
-        formData.append('image', file);
-        formData.append('project_id', PROJECT_ID);
-        formData.append('csrf_token', CSRF_TOKEN);
-        try {
-            const res = await fetch(`${AULA_APP_URL}/api/projects/upload_image.php`, { method: 'POST', body: formData });
-            const data = await res.json();
-            if (data.success) {
-                fabric.Image.fromURL(data.url, (img) => {
-                    img.scaleToWidth(240);
-                    img.set({ left: 60, top: 60 });
-                    canvas.add(img).setActiveObject(img);
-                }, { crossOrigin: 'anonymous' });
-            } else {
-                alert(data.message || 'No se pudo subir la imagen.');
-            }
-        } catch (err) {
-            alert('No se pudo subir la imagen.');
-        }
         e.target.value = '';
+        if (!file) return;
+
+        const btn = document.getElementById('btn-upload-image');
+        const label = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Subiendo...';
+
+        const r = await AulaImages.upload(file, { appUrl: AULA_APP_URL, projectId: PROJECT_ID, csrf: CSRF_TOKEN });
+        btn.disabled = false; btn.textContent = label;
+        if (!r.ok) { alert(r.message); return; }
+
+        // Misma dirección del sitio (ruta local): no hace falta CORS y siempre carga.
+        fabric.Image.fromURL(r.url, (img, isError) => {
+            if (isError || !img || !img.width) {
+                alert('La imagen se subió pero no se pudo mostrar. Recarga la página e inténtalo de nuevo.');
+                return;
+            }
+            img.scaleToWidth(Math.min(400, canvas.getWidth() * 0.5));
+            img.set({ left: 60, top: 60 });
+            canvas.add(img).setActiveObject(img);
+            canvas.renderAll();
+        });
     });
 
     document.getElementById('fill-color').addEventListener('input', (e) => {

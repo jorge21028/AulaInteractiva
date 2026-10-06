@@ -27,6 +27,7 @@ if (!$project || (int) $project['teacher_id'] !== $teacherId) {
 }
 
 $data = json_decode($project['data_json'], true) ?: [];
+$data = project_localize_data($data, $project['type']); // imágenes guardadas con URL absoluta -> ruta local
 
 $pageTitle = $project['title'];
 require __DIR__ . '/../includes/header.php';
@@ -56,6 +57,88 @@ require __DIR__ . '/../includes/header.php';
 <div class="card">
     <?php if ($project['type'] === 'resumen'): ?>
         <div style="line-height:1.7;"><?= $data['html'] ?? '<p class="text-muted">Sin contenido.</p>' ?></div>
+    <?php elseif ($project['type'] === 'imagenes'): ?>
+        <?php
+        $images = $data['images'] ?? [];
+        $n = count($images);
+        // Mientras menos imágenes, más grandes se ven (sin tener que descargarlas).
+        [$cols, $h] = match (true) {
+            $n <= 1  => [1, '72vh'],
+            $n === 2 => [2, '56vh'],
+            $n === 3 => [3, '42vh'],
+            $n === 4 => [2, '40vh'],
+            $n <= 6  => [3, '30vh'],
+            $n <= 12 => [4, '22vh'],
+            default  => [5, '17vh'],
+        };
+        ?>
+        <style>
+          .imggrid { display:grid; grid-template-columns:repeat(var(--cols), minmax(0, 1fr)); gap:12px; }
+          .imggrid figure { margin:0; background:#F1F5F9; border:1px solid var(--color-border); border-radius:10px; overflow:hidden; cursor:zoom-in; }
+          .imggrid .frame { height:var(--h); display:flex; align-items:center; justify-content:center; background:#EEF1F5; }
+          .imggrid img { max-width:100%; max-height:100%; object-fit:contain; display:block; }
+          .imggrid figcaption { padding:6px 10px; font-size:0.85rem; color:var(--color-text-muted); min-height:1.2em; }
+          @media (max-width: 700px) { .imggrid { grid-template-columns:repeat(min(var(--cols), 2), minmax(0, 1fr)); } }
+          #lightbox { display:none; position:fixed; inset:0; background:rgba(8,12,24,0.94); z-index:9999; flex-direction:column; align-items:center; justify-content:center; padding:16px; }
+          #lightbox.open { display:flex; }
+          #lightbox img { max-width:96vw; max-height:78vh; object-fit:contain; border-radius:6px; }
+          #lightbox .lb-cap { color:#fff; margin-top:10px; text-align:center; max-width:90vw; }
+          #lightbox .lb-bar { display:flex; gap:10px; align-items:center; margin-top:12px; color:#fff; flex-wrap:wrap; justify-content:center; }
+          #lightbox button, #lightbox a.lb-btn { padding:8px 16px; border:none; border-radius:8px; background:#fff; color:#111; cursor:pointer; font:inherit; text-decoration:none; }
+        </style>
+
+        <?php if ($n === 0): ?>
+            <p class="text-muted">El estudiante todavía no ha agregado imágenes.</p>
+        <?php else: ?>
+            <p class="text-muted" style="margin-top:0;"><?= $n ?> imagen<?= $n === 1 ? '' : 'es' ?> · toca una para verla en grande</p>
+            <div class="imggrid" style="--cols:<?= (int) $cols ?>; --h:<?= e($h) ?>;">
+                <?php foreach ($images as $i => $img): ?>
+                    <figure data-index="<?= (int) $i ?>">
+                        <div class="frame"><img src="<?= e($img['url']) ?>" alt="<?= e($img['caption'] ?: ($img['name'] ?: 'Imagen ' . ($i + 1))) ?>" loading="lazy"></div>
+                        <figcaption><?= e($img['caption'] !== '' ? $img['caption'] : ($img['name'] ?? '')) ?></figcaption>
+                    </figure>
+                <?php endforeach; ?>
+            </div>
+
+            <div id="lightbox" role="dialog" aria-modal="true" aria-label="Visor de imágenes">
+                <img id="lb-img" src="" alt="">
+                <div class="lb-cap" id="lb-cap"></div>
+                <div class="lb-bar">
+                    <button type="button" id="lb-prev">&larr; Anterior</button>
+                    <span id="lb-counter"></span>
+                    <button type="button" id="lb-next">Siguiente &rarr;</button>
+                    <a class="lb-btn" id="lb-open" href="#" target="_blank" rel="noopener">Abrir original</a>
+                    <button type="button" id="lb-close">✕ Cerrar</button>
+                </div>
+            </div>
+            <script>
+            (function () {
+                const images = <?= json_encode(array_values($images), JSON_UNESCAPED_UNICODE) ?>;
+                const box = document.getElementById('lightbox');
+                let idx = 0;
+                function show(i) {
+                    idx = (i + images.length) % images.length;
+                    const im = images[idx];
+                    document.getElementById('lb-img').src = im.url;
+                    document.getElementById('lb-cap').textContent = im.caption || im.name || '';
+                    document.getElementById('lb-counter').textContent = (idx + 1) + ' / ' + images.length;
+                    document.getElementById('lb-open').href = im.url;
+                    box.classList.add('open');
+                }
+                document.querySelectorAll('.imggrid figure').forEach(f => f.addEventListener('click', () => show(parseInt(f.dataset.index, 10))));
+                document.getElementById('lb-prev').addEventListener('click', () => show(idx - 1));
+                document.getElementById('lb-next').addEventListener('click', () => show(idx + 1));
+                document.getElementById('lb-close').addEventListener('click', () => box.classList.remove('open'));
+                box.addEventListener('click', (e) => { if (e.target === box) box.classList.remove('open'); });
+                document.addEventListener('keydown', (e) => {
+                    if (!box.classList.contains('open')) return;
+                    if (e.key === 'Escape') box.classList.remove('open');
+                    if (e.key === 'ArrowLeft') show(idx - 1);
+                    if (e.key === 'ArrowRight') show(idx + 1);
+                });
+            })();
+            </script>
+        <?php endif; ?>
     <?php elseif ($project['type'] === 'tabla_comparativa'): ?>
         <?php $columns = $data['columns'] ?? []; $rows = $data['rows'] ?? []; ?>
         <table style="width:100%; border-collapse:collapse;">

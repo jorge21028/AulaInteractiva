@@ -75,6 +75,7 @@ $pdo->prepare(
     'created_at' => now_datetime(),
 ]);
 
-$url = rtrim(APP_URL, '/') . '/uploads/' . ($kind === 'audio' ? 'audio' : 'video') . '/' . $storedName;
+// Ruta local (sin dominio), igual que las imágenes: carga aunque el sitio se abra con otra dirección distinta a APP_URL.
+$url = rtrim((string) (parse_url(APP_URL, PHP_URL_PATH) ?? ''), '/') . '/uploads/' . ($kind === 'audio' ? 'audio' : 'video') . '/' . $storedName;
 
 json_response(['success' => true, 'url' => $url, 'kind' => $kind]);

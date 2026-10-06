@@ -25,6 +25,7 @@ if (!$project) {
 }
 
 $data = json_decode($project['data_json'], true) ?: ['html' => ''];
+$data = project_localize_data($data, 'resumen'); // imágenes/medios guardados con URL absoluta -> ruta local
 $isSubmitted = $project['status'] === 'submitted';
 
 $pageTitle = $project['title'];
@@ -51,6 +52,8 @@ require __DIR__ . '/../includes/header.php';
         <p class="alert alert-success" style="margin-top:16px;">Este trabajo ya fue entregado y no se puede modificar.</p>
     <?php else: ?>
         <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <button type="button" class="btn btn-secondary" id="btn-add-image" style="margin:0; padding:6px 12px; font-size:0.85rem;">+ Imagen</button>
+            <input type="file" id="file-image" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none;">
             <button type="button" class="btn btn-secondary" id="btn-add-audio" style="margin:0; padding:6px 12px; font-size:0.85rem;">+ Audio</button>
             <button type="button" class="btn btn-secondary" id="btn-add-video" style="margin:0; padding:6px 12px; font-size:0.85rem;">+ Video</button>
             <input type="file" id="file-audio" accept="audio/mpeg,audio/wav,audio/ogg" style="display:none;">
@@ -71,6 +74,7 @@ require __DIR__ . '/../includes/header.php';
 
 <?php if (!$isSubmitted): ?>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.6/quill.min.js"></script>
+<script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/image_upload.js"></script>
 <script>
 const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;
 const PROJECT_ID = <?= (int) $project['id'] ?>;
@@ -100,6 +104,23 @@ async function uploadMedia(kind, file) {
     const res = await fetch(`${AULA_APP_URL}/api/projects/upload_media.php`, { method: 'POST', body: formData });
     return res.json();
 }
+
+document.getElementById('btn-add-image').addEventListener('click', () => document.getElementById('file-image').click());
+document.getElementById('file-image').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    const btn = document.getElementById('btn-add-image');
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Subiendo...';
+    const r = await AulaImages.upload(file, { appUrl: AULA_APP_URL, projectId: PROJECT_ID, csrf: CSRF_TOKEN });
+    btn.disabled = false; btn.textContent = label;
+    if (!r.ok) { alert(r.message); return; }
+    const range = quill.getSelection(true);
+    quill.insertEmbed(range.index, 'image', r.url, 'user');
+    quill.insertText(range.index + 1, '\n', 'user');
+    quill.setSelection(range.index + 2, 0, 'silent');
+});
 
 document.getElementById('btn-add-audio').addEventListener('click', () => document.getElementById('file-audio').click());
 document.getElementById('btn-add-video').addEventListener('click', () => document.getElementById('file-video').click());

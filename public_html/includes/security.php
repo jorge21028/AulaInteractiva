@@ -110,6 +110,40 @@ function is_allowed_extension(string $filename, array $allowedList): bool
 }
 
 /**
+ * Convierte la URL de un archivo subido en una RUTA LOCAL (empieza con "/", sin dominio), o null si no es un
+ * archivo subido por nuestro propio sistema.
+ *
+ * Por qué: la URL absoluta depende de APP_URL (http/https, con o sin "www"). Si no coincide exactamente con la
+ * dirección con la que el estudiante abrió el sitio, el navegador bloquea la imagen (contenido mixto / otro origen)
+ * y el limpiador de datos la descartaba. Guardando solo la ruta ("/uploads/images/abc.jpg") la imagen siempre se
+ * pide al mismo sitio que la muestra.
+ *
+ * Solo acepta nombres que genera safe_random_filename() (32 hex + extensión), así no se puede referenciar nada
+ * externo ni escapar de la carpeta de subidas.
+ */
+function uploads_local_path(string $url, string $kind = 'images'): ?string
+{
+    $extByKind = [
+        'images' => 'jpg|jpeg|png|gif|webp',
+        'audio'  => 'mp3|wav|ogg',
+        'video'  => 'mp4|webm',
+    ];
+    if (!isset($extByKind[$kind])) {
+        return null;
+    }
+
+    $path = parse_url(trim($url), PHP_URL_PATH);
+    if (!is_string($path) || $path === '') {
+        return null;
+    }
+
+    $base = rtrim((string) (parse_url(APP_URL, PHP_URL_PATH) ?? ''), '/');
+    $pattern = '~^' . preg_quote($base, '~') . '/uploads/' . $kind . '/[a-f0-9]{32}\.(' . $extByKind[$kind] . ')$~i';
+
+    return preg_match($pattern, $path) ? $path : null;
+}
+
+/**
  * Sanea HTML enriquecido generado por el estudiante (ej: editor de
  * resúmenes) antes de guardarlo. Usa una lista blanca estricta de
  * etiquetas y atributos: cualquier cosa fuera de esa lista se elimina
@@ -127,7 +161,7 @@ function sanitize_rich_html(string $html): string
 
     $allowedTags = [
         'p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'ul', 'ol', 'li',
-        'h1', 'h2', 'h3', 'blockquote', 'a', 'span', 'div', 'audio', 'video', 'source',
+        'h1', 'h2', 'h3', 'blockquote', 'a', 'span', 'div', 'audio', 'video', 'source', 'img',
     ];
 
     $doc = new DOMDocument();
@@ -207,9 +241,22 @@ function sanitize_dom_node(DOMNode $node, array $allowedTags): void
                     if (preg_match('~^(https?://|/)~i', $value)) {
                         $keep = true;
                     }
+                } elseif ($tagName === 'img' && $name === 'src') {
+                    // Solo imágenes subidas por nuestro sistema; se guarda la ruta local (ver uploads_local_path).
+                    $local = uploads_local_path($attr->value, 'images');
+                    if ($local !== null) {
+                        $attr->value = $local;
+                        $keep = true;
+                    }
+                } elseif ($tagName === 'img' && $name === 'alt') {
+                    $attr->value = mb_substr(strip_tags($attr->value), 0, 200);
+                    $keep = true;
+                } elseif ($tagName === 'img' && in_array($name, ['width', 'height'], true) && ctype_digit($attr->value) && (int) $attr->value <= 3000) {
+                    $keep = true;
                 } elseif (in_array($tagName, ['audio', 'video', 'source'], true) && $name === 'src') {
-                    $value = trim($attr->value);
-                    if (str_starts_with($value, $uploadsPrefix)) {
+                    $local = uploads_local_path($attr->value, $tagName === 'audio' ? 'audio' : 'video');
+                    if ($local !== null) {
+                        $attr->value = $local;
                         $keep = true;
                     }
                 } elseif (in_array($tagName, ['audio', 'video'], true) && $name === 'controls') {
@@ -228,6 +275,12 @@ function sanitize_dom_node(DOMNode $node, array $allowedTags): void
                 $child->setAttribute('rel', 'noopener noreferrer');
                 $child->setAttribute('target', '_blank');
             }
+        }
+
+        // Una imagen sin una ruta válida de nuestras subidas no se conserva.
+        if ($tagName === 'img' && !$child->hasAttribute('src')) {
+            $node->removeChild($child);
+            continue;
         }
 
         sanitize_dom_node($child, $allowedTags);

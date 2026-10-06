@@ -34,9 +34,11 @@ $defaultTab = $counts['needs'] > 0 ? 'needs' : ($counts['pending'] > 0 ? 'pendin
 // Material de la asignatura (para llegar rápido a crear/editar)
 $matStmt = $pdo->prepare(
     'SELECT (SELECT COUNT(*) FROM activities WHERE subject_id = :s1 AND teacher_id = :t1) AS activities_count,
-            (SELECT COUNT(*) FROM quizzes WHERE subject_id = :s2 AND teacher_id = :t2) AS quizzes_count'
+            (SELECT COUNT(*) FROM quizzes WHERE subject_id = :s2 AND teacher_id = :t2) AS quizzes_count,
+            (SELECT COUNT(*) FROM subject_folders WHERE subject_id = :s3) AS folders_count,
+            (SELECT COUNT(*) FROM subject_files sf INNER JOIN subject_folders fo ON fo.id = sf.folder_id WHERE fo.subject_id = :s4) AS files_count'
 );
-$matStmt->execute(['s1' => $subjectId, 't1' => $teacherId, 's2' => $subjectId, 't2' => $teacherId]);
+$matStmt->execute(['s1' => $subjectId, 't1' => $teacherId, 's2' => $subjectId, 't2' => $teacherId, 's3' => $subjectId, 's4' => $subjectId]);
 $material = $matStmt->fetch();
 
 $tabs = [
@@ -62,7 +64,10 @@ require __DIR__ . '/../includes/header.php';
         <h1><?= e($subject['name']) ?></h1>
         <p class="space-sub"><?= e($subject['course_name']) ?></p>
     </div>
-    <a class="btn" href="assignments.php?subject=<?= (int) $subjectId ?>">➕ Nueva asignación</a>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="btn btn-secondary" href="materials.php?subject=<?= (int) $subjectId ?>">📁 Archivos para estudiantes</a>
+        <a class="btn" href="assignments.php?subject=<?= (int) $subjectId ?>">➕ Nueva asignación</a>
+    </div>
 </div>
 
 <div class="stat-row">
@@ -170,8 +175,10 @@ require __DIR__ . '/../includes/header.php';
     <h2 style="margin-top:0; font-size:1.05rem;">📚 Material de esta asignatura</h2>
     <p class="text-muted" style="margin-top:0;">
         <?= (int) $material['activities_count'] ?> actividad(es) interactiva(s) ·
-        <?= (int) $material['quizzes_count'] ?> cuestionario(s)
+        <?= (int) $material['quizzes_count'] ?> cuestionario(s) ·
+        <?= (int) $material['folders_count'] ?> carpeta(s) con <?= (int) $material['files_count'] ?> archivo(s) para descargar
     </p>
+    <a class="btn btn-secondary" href="materials.php?subject=<?= (int) $subjectId ?>">📁 Archivos para estudiantes</a>
     <a class="btn btn-secondary" href="activities.php">Actividades interactivas</a>
     <a class="btn btn-secondary" href="quizzes.php">📝 Cuestionarios</a>
 </section>

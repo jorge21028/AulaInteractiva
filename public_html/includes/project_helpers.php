@@ -20,7 +20,11 @@ const PROJECT_TYPES = [
     'infografia' => 'Infografía',
     'mapa_mental' => 'Mapa mental',
     'presentacion' => 'Presentación',
+    'imagenes' => 'Entrega de imágenes (fotos)',
 ];
+
+/** Máximo de imágenes por entrega de tipo "imagenes". */
+const PROJECT_MAX_IMAGES = 20;
 
 /**
  * Tipos que usan el editor gráfico (Canvas/Fabric.js) de una sola página
@@ -64,6 +68,7 @@ function project_default_data(string $type): array
                 ['width' => 960, 'height' => 540, 'backgroundColor' => '#ffffff', 'objects' => []],
             ],
         ],
+        'imagenes' => ['images' => []],
         default => [],
     };
 }
@@ -102,6 +107,9 @@ function project_has_content(string $type, ?string $dataJson): bool
                 }
             }
             return false;
+
+        case 'imagenes':
+            return !empty($data['images']);
 
         case 'infografia':
         case 'mapa_mental':
@@ -145,6 +153,10 @@ function project_sanitize_data(array $data, string $type = '', int $studentId = 
         $data = project_sanitize_canvas_layer($data);
     }
 
+    if ($type === 'imagenes') {
+        $data = project_sanitize_images_data($data);
+    }
+
     if (in_array($type, PROJECT_SLIDE_TYPES, true)) {
         $slides = is_array($data['slides'] ?? null) ? $data['slides'] : [];
         $slides = array_slice($slides, 0, 60); // límite razonable de diapositivas
@@ -168,6 +180,94 @@ function project_sanitize_data(array $data, string $type = '', int $studentId = 
 }
 
 /**
+ * Convierte a rutas locales las URL de archivos subidos que haya dentro de los datos de un trabajo YA guardado
+ * (proyectos creados antes de que se guardaran rutas locales, con la URL absoluta de APP_URL). Se usa al cargar
+ * un trabajo en el editor o en la vista del profesor, para que las imágenes carguen aunque el sitio se abra con
+ * otra dirección (http/https o con/sin www) distinta a APP_URL.
+ */
+function project_localize_data(array $data, string $type): array
+{
+    $localizeUrl = function ($url) {
+        if (!is_string($url)) {
+            return $url;
+        }
+        foreach (['images', 'audio', 'video'] as $kind) {
+            $local = uploads_local_path($url, $kind);
+            if ($local !== null) {
+                return $local;
+            }
+        }
+        return $url;
+    };
+
+    $localizeObjects = function (array $objects) use ($localizeUrl): array {
+        foreach ($objects as &$o) {
+            if (is_array($o) && isset($o['src'])) {
+                $o['src'] = $localizeUrl($o['src']);
+            }
+        }
+        unset($o);
+        return $objects;
+    };
+
+    if (isset($data['objects']) && is_array($data['objects'])) {
+        $data['objects'] = $localizeObjects($data['objects']);
+    }
+    if (isset($data['slides']) && is_array($data['slides'])) {
+        foreach ($data['slides'] as &$slide) {
+            if (is_array($slide) && isset($slide['objects']) && is_array($slide['objects'])) {
+                $slide['objects'] = $localizeObjects($slide['objects']);
+            }
+        }
+        unset($slide);
+    }
+    if (isset($data['images']) && is_array($data['images'])) {
+        foreach ($data['images'] as &$img) {
+            if (is_array($img) && isset($img['url'])) {
+                $img['url'] = $localizeUrl($img['url']);
+            }
+        }
+        unset($img);
+    }
+    if (isset($data['html']) && is_string($data['html'])) {
+        $data['html'] = preg_replace_callback(
+            '~\b(src)="([^"]+)"~i',
+            fn($m) => 'src="' . htmlspecialchars((string) $localizeUrl(html_entity_decode($m[2])), ENT_QUOTES, 'UTF-8') . '"',
+            $data['html']
+        );
+    }
+
+    return $data;
+}
+
+/**
+ * Sanea los datos de una "Entrega de imágenes": lista de imágenes propias (subidas con upload_image.php), cada una
+ * con un pie de foto corto. Se descartan las que no sean archivos subidos por el sistema.
+ */
+function project_sanitize_images_data(array $data): array
+{
+    $images = is_array($data['images'] ?? null) ? $data['images'] : [];
+    $clean = [];
+
+    foreach ($images as $img) {
+        if (!is_array($img) || count($clean) >= PROJECT_MAX_IMAGES) {
+            continue;
+        }
+        $local = uploads_local_path((string) ($img['url'] ?? ''), 'images');
+        if ($local === null) {
+            continue;
+        }
+        $clean[] = [
+            'url'     => $local,
+            'caption' => mb_substr(trim(strip_tags((string) ($img['caption'] ?? ''))), 0, 200),
+            'name'    => mb_substr(trim(strip_tags((string) ($img['name'] ?? ''))), 0, 120),
+        ];
+    }
+
+    return ['images' => $clean];
+}
+
+/**
  * Sanea una sola "capa" tipo lienzo (ancho, alto, color de fondo y lista
  * de objetos Fabric.js): se usa tanto para infografías/mapas mentales
  * (una sola capa) como para cada diapositiva de una presentación.
@@ -184,16 +284,19 @@ function project_sanitize_canvas_layer(array $layer): array
     $objects = is_array($layer['objects'] ?? null) ? $layer['objects'] : [];
     $objects = array_slice($objects, 0, 300);
 
-    $uploadsPrefix = rtrim(APP_URL, '/') . '/uploads/images/';
-
     foreach ($objects as $i => &$obj) {
         if (!is_array($obj)) {
             unset($objects[$i]);
             continue;
         }
         if (($obj['type'] ?? '') === 'image') {
-            $src = (string) ($obj['src'] ?? '');
-            if (!str_starts_with($src, $uploadsPrefix)) {
+            // Se guarda la ruta local ("/uploads/images/xxx.jpg"), no la URL absoluta: así la imagen carga aunque el
+            // sitio se abra con otra dirección distinta de APP_URL (http/https, con o sin www).
+            $local = uploads_local_path((string) ($obj['src'] ?? ''), 'images');
+            if ($local !== null) {
+                $obj['src'] = $local;
+            }
+            if ($local === null) {
                 // Imagen que no viene de nuestro propio endpoint de subida: descartar el objeto.
                 unset($objects[$i]);
             }
