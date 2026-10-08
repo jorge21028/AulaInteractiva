@@ -129,3 +129,96 @@ function submission_delete_entry(PDO $pdo, array $assignment, int $submissionId)
 
     return [true, 'Se borró la entrega de ' . $sub['student_name'] . '. Ya puede hacer la asignación de nuevo.'];
 }
+
+/** Estudiantes inscritos en el curso de una asignatura: [['id','name','email'], ...] ordenados por nombre. */
+function course_students_for_subject(PDO $pdo, int $subjectId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT u.id, u.name, u.email FROM subjects s
+         INNER JOIN course_students cs ON cs.course_id = s.course_id
+         INNER JOIN users u ON u.id = cs.student_id
+         WHERE s.id = :sid ORDER BY u.name ASC'
+    );
+    $stmt->execute(['sid' => $subjectId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Agrega estudiantes del curso a una asignación ya creada (por ejemplo, otro estudiante que también va a recuperación).
+ * Solo se aceptan estudiantes inscritos en el curso y que todavía no la tengan.
+ * Devuelve [int agregados, string mensaje].
+ */
+function assignment_add_students(PDO $pdo, array $assignment, array $studentIds): array
+{
+    $valid = [];
+    foreach (course_students_for_subject($pdo, (int) $assignment['subject_id']) as $s) {
+        $valid[(int) $s['id']] = $s['name'];
+    }
+
+    $existsStmt = $pdo->prepare('SELECT 1 FROM submissions WHERE assignment_id = :aid AND student_id = :sid');
+    $insertAS = $pdo->prepare('INSERT IGNORE INTO assignment_students (assignment_id, student_id) VALUES (:aid, :sid)');
+    $insertSub = $pdo->prepare("INSERT INTO submissions (assignment_id, student_id, status, created_at) VALUES (:aid, :sid, 'pending', :now)");
+
+    $added = 0;
+    $pdo->beginTransaction();
+    try {
+        foreach (array_unique(array_map('intval', $studentIds)) as $sid) {
+            if (!isset($valid[$sid])) {
+                continue; // no es estudiante de este curso
+            }
+            $existsStmt->execute(['aid' => $assignment['id'], 'sid' => $sid]);
+            if ($existsStmt->fetch()) {
+                continue; // ya la tiene
+            }
+            $insertAS->execute(['aid' => $assignment['id'], 'sid' => $sid]);
+            $insertSub->execute(['aid' => $assignment['id'], 'sid' => $sid, 'now' => now_datetime()]);
+            $added++;
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('assignment_add_students: ' . $e->getMessage());
+        return [0, 'No se pudieron agregar los estudiantes. Intenta de nuevo.'];
+    }
+
+    if ($added === 0) {
+        return [0, 'No se agregó a nadie (ya la tenían o no pertenecen a este curso).'];
+    }
+    return [$added, $added === 1 ? 'Se agregó 1 estudiante a la asignación.' : "Se agregaron {$added} estudiantes a la asignación."];
+}
+
+/**
+ * Quita a un estudiante de la asignación: desaparece de su panel y de la lista del profesor. Si ya había hecho algo
+ * (trabajo, intentos, nota), eso también se borra. Devuelve [bool ok, string mensaje].
+ */
+function assignment_remove_student(PDO $pdo, array $assignment, int $submissionId): array
+{
+    $sub = submission_load_for_assignment($pdo, $submissionId, (int) $assignment['id']);
+    if (!$sub) {
+        return [false, 'Entrega no encontrada.'];
+    }
+
+    // Limpia todo lo que generó el estudiante (trabajo, intentos de cuestionario, juego...)
+    [$ok, $msg] = submission_delete_entry($pdo, $assignment, $submissionId);
+    if (!$ok) {
+        return [false, $msg];
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('DELETE FROM submissions WHERE id = :id')->execute(['id' => $submissionId]);
+        $pdo->prepare('DELETE FROM assignment_students WHERE assignment_id = :aid AND student_id = :sid')
+            ->execute(['aid' => $assignment['id'], 'sid' => $sub['student_id']]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('assignment_remove_student: ' . $e->getMessage());
+        return [false, 'No se pudo quitar al estudiante. Intenta de nuevo.'];
+    }
+
+    return [true, $sub['student_name'] . ' ya no tiene esta asignación.'];
+}

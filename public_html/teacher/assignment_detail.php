@@ -32,11 +32,26 @@ if (!$assignment) {
 $postedOverride = []; // valores enviados que no pasaron validación (para no perder lo escrito)
 
 // Acciones sobre la entrega de un estudiante: devolver para corregir / borrar la entrega
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['return_submission', 'delete_submission'], true)) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['return_submission', 'delete_submission', 'remove_student', 'add_students'], true)) {
     csrf_verify($_POST['csrf_token'] ?? null);
     $submissionId = (int) ($_POST['submission_id'] ?? 0);
 
-    if ($_POST['action'] === 'return_submission') {
+    if ($_POST['action'] === 'add_students') {
+        [$addedCount, $msgAction] = assignment_add_students($pdo, $assignment, (array) ($_POST['student_ids'] ?? []));
+        $okAction = $addedCount > 0;
+        if ($okAction) {
+            audit_log($pdo, $teacherId, 'assignment_add_students', "Asignación #{$assignmentId}: +{$addedCount} estudiante(s)");
+        }
+    } elseif ($_POST['action'] === 'remove_student') {
+        if (($_POST['confirm'] ?? '') !== '1') {
+            [$okAction, $msgAction] = [false, 'Falta confirmar.'];
+        } else {
+            [$okAction, $msgAction] = assignment_remove_student($pdo, $assignment, $submissionId);
+            if ($okAction) {
+                audit_log($pdo, $teacherId, 'assignment_remove_student', "Entrega #{$submissionId} quitada de la asignación #{$assignmentId}");
+            }
+        }
+    } elseif ($_POST['action'] === 'return_submission') {
         [$okAction, $msgAction] = submission_return_to_student($pdo, $assignment, $submissionId, (string) ($_POST['note'] ?? ''));
         if ($okAction) {
             audit_log($pdo, $teacherId, 'submission_return', "Entrega #{$submissionId} de la asignación #{$assignmentId} devuelta");
@@ -136,7 +151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 }
 
 $rosterStmt = $pdo->prepare(
-    'SELECT sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id, sub.quiz_attempt_id,
+    'SELECT sub.id AS submission_id, sub.student_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id, sub.quiz_attempt_id,
         qa.tab_switches, wga.status AS wg_status, wga.correct_count AS wg_correct, wga.total_count AS wg_total,
         wga.state_json AS wg_state, wga.updated_at AS wg_updated_at,
         sub.returned_at, sub.return_note,
@@ -266,6 +281,12 @@ foreach ($roster as $i => $row) {
     $progressCounts[$roster[$i]['progress']['state']]++;
 }
 $isCreationAssignment = empty($assignment['activity_id']) && empty($assignment['quiz_id']);
+
+// Estudiantes del curso que todavía NO tienen esta asignación (para poder agregarlos)
+$inRoster = array_flip(array_map(fn($r) => (int) $r['student_id'], $roster));
+$courseStudents = course_students_for_subject($pdo, (int) $assignment['subject_id']);
+$notAssigned = array_values(array_filter($courseStudents, fn($s) => !isset($inRoster[(int) $s['id']])));
+$isTargeted = ($assignment['audience'] ?? 'all') === 'selected';
 $isLiveActivity = !empty($assignment['activity_id']) && !in_array($assignment['game_mode'] ?? null, ['ahorcado', 'crucigrama'], true);
 
 $pageTitle = $assignment['title'];
@@ -273,6 +294,13 @@ require __DIR__ . '/../includes/header.php';
 ?>
 <p><a href="subject.php?id=<?= (int) $assignment['subject_id'] ?>">&larr; Volver a la asignatura</a></p>
 <h1><?= e($assignment['title']) ?></h1>
+<?php if ($isTargeted || !empty($notAssigned)): ?>
+    <p style="margin:-4px 0 8px;">
+        <span style="display:inline-block; padding:3px 12px; border-radius:999px; font-weight:600; font-size:0.85rem; background:#EEF2FF; color:#4338CA; border:1px solid #C7D2FE;">
+            🎯 <?= $isTargeted ? 'Solo para ' : 'Asignada a ' ?><?= count($roster) ?> de <?= count($courseStudents) ?> estudiante<?= count($courseStudents) === 1 ? '' : 's' ?> del curso
+        </span>
+    </p>
+<?php endif; ?>
 <p class="text-muted">
     <?= e($assignment['subject_name']) ?> ·
     <?php if ($assignment['activity_title']): ?>
@@ -382,7 +410,7 @@ require __DIR__ . '/../includes/header.php';
                         </div>
                     </div>
 
-                    <?php if ($r['can_return'] || $r['has_data']): ?>
+                    <?php if (true): ?>
                         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
                             <?php if ($r['can_return']): ?>
                                 <button type="button" class="btn btn-secondary btn-return" style="margin:0; padding:5px 12px; font-size:0.85rem;"
@@ -396,6 +424,10 @@ require __DIR__ . '/../includes/header.php';
                                     🗑️ Borrar entrega
                                 </button>
                             <?php endif; ?>
+                            <button type="button" class="btn btn-secondary btn-remove-student" style="margin:0; padding:5px 12px; font-size:0.85rem;"
+                                    data-submission="<?= $sid ?>" data-student="<?= e($r['student_name']) ?>" data-has-data="<?= $r['has_data'] ? '1' : '0' ?>">
+                                ➖ Quitar de esta asignación
+                            </button>
                         </div>
                         <?php if (!empty($r['returned_at']) && !empty($r['return_note'])): ?>
                             <p class="text-muted" style="font-size:0.8rem; margin:6px 0 0;">Motivo de la devolución: <?= e($r['return_note']) ?></p>
@@ -474,6 +506,34 @@ require __DIR__ . '/../includes/header.php';
         </script>
     <?php endif; ?>
 </section>
+<?php if (!empty($notAssigned)): ?>
+<section class="card" style="margin-top:16px;">
+    <h2 style="margin-top:0;">➕ Agregar estudiantes a esta asignación</h2>
+    <p class="text-muted" style="margin-top:-6px;">
+        <?= $isTargeted ? 'Solo la tienen los estudiantes de la lista de arriba. Marca a quién más quieres asignársela.' : 'Estos estudiantes del curso no tienen esta asignación.' ?>
+    </p>
+    <form method="post" action="assignment_detail.php?id=<?= (int) $assignmentId ?>">
+        <?php csrf_field(); ?>
+        <input type="hidden" name="action" value="add_students">
+        <div style="max-height:260px; overflow:auto; border:1px solid var(--color-border); border-radius:10px;">
+            <?php foreach ($notAssigned as $ns): ?>
+                <label style="display:flex; align-items:center; gap:10px; margin:0; padding:8px 12px; font-weight:400; border-bottom:1px solid #EEF1F5; cursor:pointer;">
+                    <input type="checkbox" name="student_ids[]" value="<?= (int) $ns['id'] ?>" style="width:auto;">
+                    <span><strong><?= e($ns['name']) ?></strong> <small class="text-muted"><?= e($ns['email']) ?></small></span>
+                </label>
+            <?php endforeach; ?>
+        </div>
+        <button type="submit" class="btn" style="margin-top:10px;">Agregar a la asignación</button>
+    </form>
+</section>
+<?php endif; ?>
+
+<form method="post" action="assignment_detail.php?id=<?= (int) $assignmentId ?>" id="remove-form" style="display:none;">
+    <?php csrf_field(); ?>
+    <input type="hidden" name="action" value="remove_student">
+    <input type="hidden" name="submission_id" id="remove-submission-id" value="">
+    <input type="hidden" name="confirm" value="1">
+</form>
 <form method="post" action="assignment_detail.php?id=<?= (int) $assignmentId ?>" id="return-form" style="display:none;">
     <?php csrf_field(); ?>
     <input type="hidden" name="action" value="return_submission">
@@ -517,6 +577,13 @@ require __DIR__ . '/../includes/header.php';
         dlg.close();
         document.getElementById('return-form').submit();
     });
+
+    document.querySelectorAll('.btn-remove-student').forEach(b => b.addEventListener('click', () => {
+        const extra = b.dataset.hasData === '1' ? '\n\nOJO: ya tiene trabajo o intentos en esta asignación; se borrarán.' : '';
+        if (!confirm('¿Quitar a ' + b.dataset.student + ' de esta asignación?\n\nDejará de aparecerle y se quitará de tu lista.' + extra)) return;
+        document.getElementById('remove-submission-id').value = b.dataset.submission;
+        document.getElementById('remove-form').submit();
+    }));
 
     document.querySelectorAll('.btn-delete').forEach(b => b.addEventListener('click', () => {
         const ok = confirm('¿Borrar la entrega de ' + b.dataset.student + '?\n\n' +

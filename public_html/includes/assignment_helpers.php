@@ -10,9 +10,11 @@ if (!defined('AULA_APP')) {
 }
 
 /**
- * Crea una asignación y la reparte automáticamente entre todos los
- * estudiantes actualmente inscritos en el curso de esa asignatura,
- * creando una entrega en estado 'pending' para cada uno.
+ * Crea una asignación y la reparte entre los estudiantes del curso de esa asignatura, creando una entrega
+ * en estado 'pending' para cada uno.
+ *   - $studentIds = null  -> la reciben TODOS los estudiantes inscritos (audience = 'all').
+ *   - $studentIds = [...] -> la reciben SOLO esos estudiantes (audience = 'selected'): recuperación, refuerzo, etc.
+ *                            Solo se aceptan estudiantes inscritos en el curso de la asignatura.
  */
 function assignment_create(
     PDO $pdo,
@@ -25,13 +27,14 @@ function assignment_create(
     ?string $dueDate,
     int $points,
     ?string $projectType = null,
-    ?int $quizId = null
+    ?int $quizId = null,
+    ?array $studentIds = null
 ): int {
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare(
-            'INSERT INTO assignments (teacher_id, subject_id, activity_id, quiz_id, project_type, title, description, start_date, due_date, points, created_at)
-             VALUES (:teacher_id, :subject_id, :activity_id, :quiz_id, :project_type, :title, :description, :start_date, :due_date, :points, :created_at)'
+            'INSERT INTO assignments (teacher_id, subject_id, activity_id, quiz_id, project_type, title, description, start_date, due_date, points, audience, created_at)
+             VALUES (:teacher_id, :subject_id, :activity_id, :quiz_id, :project_type, :title, :description, :start_date, :due_date, :points, :audience, :created_at)'
         );
         $stmt->execute([
             'teacher_id'  => $teacherId,
@@ -44,6 +47,7 @@ function assignment_create(
             'start_date'  => $startDate ?: null,
             'due_date'    => $dueDate ?: null,
             'points'      => $points,
+            'audience'    => $studentIds === null ? 'all' : 'selected',
             'created_at'  => now_datetime(),
         ]);
         $assignmentId = (int) $pdo->lastInsertId();
@@ -56,6 +60,15 @@ function assignment_create(
         );
         $studStmt->execute(['subject_id' => $subjectId]);
         $students = $studStmt->fetchAll();
+
+        if ($studentIds !== null) {
+            // Solo los elegidos (y únicamente si de verdad están inscritos en este curso)
+            $wanted = array_flip(array_map('intval', $studentIds));
+            $students = array_values(array_filter($students, fn($s) => isset($wanted[(int) $s['student_id']])));
+            if (empty($students)) {
+                throw new RuntimeException('Ningún estudiante válido seleccionado.');
+            }
+        }
 
         $insertAS = $pdo->prepare('INSERT INTO assignment_students (assignment_id, student_id) VALUES (:aid, :sid)');
         $insertSub = $pdo->prepare(
@@ -143,6 +156,11 @@ function assignment_sync_from_game(PDO $pdo, int $gameId): void
             $submission = $subStmt->fetch();
 
             if (!$submission) {
+                // Asignación solo para algunos estudiantes (recuperación): quien no fue elegido no recibe entrega
+                // aunque haya jugado la misma actividad en otra partida.
+                if (($assignment['audience'] ?? 'all') === 'selected') {
+                    continue;
+                }
                 $pdo->prepare(
                     "INSERT INTO submissions (assignment_id, student_id, status, created_at) VALUES (:aid, :sid, 'pending', :created_at)"
                 )->execute(['aid' => $assignment['id'], 'sid' => $player['student_id'], 'created_at' => now_datetime()]);

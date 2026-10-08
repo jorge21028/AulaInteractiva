@@ -102,7 +102,11 @@ require __DIR__ . '/../includes/header.php';
             <a class="asg-card <?= $cardClass ?>" href="assignment_detail.php?id=<?= (int) $a['id'] ?>"
                data-needs="<?= $a['is_needs'] ? 1 : 0 ?>" data-pending="<?= $a['is_pending'] ? 1 : 0 ?>" data-done="<?= $a['is_done'] ? 1 : 0 ?>">
                 <h3><?= e($icon) ?> <?= e($a['title']) ?></h3>
-                <p class="asg-kind"><?= e($kind) ?></p>
+                <p class="asg-kind"><?= e($kind) ?>
+                    <?php if (($a['audience'] ?? 'all') === 'selected'): ?>
+                        <span class="chip chip-blue" style="margin-left:4px;">🎯 Solo para <?= (int) $a['total'] ?> estudiante<?= $a['total'] === 1 ? '' : 's' ?></span>
+                    <?php endif; ?>
+                </p>
 
                 <div class="progress" title="<?= (int) $a['graded'] ?> calificadas · <?= (int) $a['needs_grading'] ?> por corregir · <?= (int) $a['pending'] ?> sin entregar">
                     <span class="p-graded" style="width:<?= round($a['graded'] / $total * 100, 1) ?>%"></span>

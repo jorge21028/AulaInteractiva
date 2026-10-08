@@ -311,6 +311,11 @@ function quiz_sync_submission(PDO $pdo, int $quizId, int $studentId, int $attemp
         $submission = $subStmt->fetch();
 
         if (!$submission) {
+            // Asignación solo para algunos estudiantes (recuperación): no se crea entrega a quien no fue elegido,
+            // aunque haya presentado el mismo cuestionario desde otra asignación.
+            if (($assignment['audience'] ?? 'all') === 'selected') {
+                continue;
+            }
             $pdo->prepare(
                 "INSERT INTO submissions (assignment_id, student_id, status, created_at) VALUES (:aid, :sid, 'pending', :created_at)"
             )->execute(['aid' => $assignment['id'], 'sid' => $studentId, 'created_at' => now_datetime()]);

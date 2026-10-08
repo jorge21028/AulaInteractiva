@@ -36,9 +36,9 @@ function course_enroll_student(PDO $pdo, int $courseId, int $studentId): array
 
         // Relleno: asignaciones ya existentes en las asignaturas de este curso.
         $assignStmt = $pdo->prepare(
-            'SELECT a.id FROM assignments a
+            "SELECT a.id FROM assignments a
              INNER JOIN subjects s ON s.id = a.subject_id
-             WHERE s.course_id = :course_id'
+             WHERE s.course_id = :course_id AND a.audience = 'all'"
         );
         $assignStmt->execute(['course_id' => $courseId]);
         $assignmentIds = $assignStmt->fetchAll(PDO::FETCH_COLUMN);

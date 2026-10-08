@@ -37,7 +37,7 @@ function space_gradient(int $id): string
  */
 function space_assignment_rows(PDO $pdo, int $teacherId, ?int $courseId = null, ?int $subjectId = null): array
 {
-    $sql = 'SELECT a.id, a.title, a.due_date, a.points, a.project_type, a.activity_id, a.quiz_id, a.created_at, a.subject_id,
+    $sql = 'SELECT a.id, a.title, a.due_date, a.points, a.project_type, a.activity_id, a.quiz_id, a.created_at, a.subject_id, a.audience,
                    s.name AS subject_name, s.course_id, act.title AS activity_title, act.game_mode, qz.title AS quiz_title,
                    COUNT(sub.id) AS total,
                    COALESCE(SUM(sub.status = \'completed\'), 0) AS completed,
