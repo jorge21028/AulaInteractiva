@@ -65,6 +65,7 @@ require __DIR__ . '/../includes/header.php';
         <p class="space-sub"><?= e($subject['course_name']) ?></p>
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="btn btn-secondary" href="subject_report.php?id=<?= (int) $subjectId ?>">📊 Reporte de estudiantes</a>
         <a class="btn btn-secondary" href="materials.php?subject=<?= (int) $subjectId ?>">📁 Archivos para estudiantes</a>
         <a class="btn" href="assignments.php?subject=<?= (int) $subjectId ?>">➕ Nueva asignación</a>
     </div>

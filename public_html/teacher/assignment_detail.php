@@ -4,6 +4,7 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
 require_once __DIR__ . '/../includes/submission_admin_helpers.php';
+require_once __DIR__ . '/../includes/report_helpers.php'; // ¿el estudiante realmente envió la asignación?
 
 require_role('teacher');
 
@@ -154,7 +155,8 @@ $rosterStmt = $pdo->prepare(
     'SELECT sub.id AS submission_id, sub.student_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id, sub.quiz_attempt_id,
         qa.tab_switches, wga.status AS wg_status, wga.correct_count AS wg_correct, wga.total_count AS wg_total,
         wga.state_json AS wg_state, wga.updated_at AS wg_updated_at,
-        sub.returned_at, sub.return_note,
+        sub.returned_at, sub.return_note, sub.game_id,
+        (SELECT COUNT(*) FROM quiz_attempts qa4 WHERE qa4.assignment_id = sub.assignment_id AND qa4.student_id = sub.student_id AND qa4.status <> \'in_progress\') AS quiz_done,
         (SELECT COUNT(*) FROM quiz_attempts qa3 WHERE qa3.assignment_id = sub.assignment_id AND qa3.student_id = sub.student_id) AS quiz_attempts_total,
         sp.id AS draft_project_id, sp.status AS project_status, sp.type AS draft_type, sp.data_json AS draft_data,
         sp.updated_at AS project_updated_at,
@@ -278,6 +280,8 @@ foreach ($roster as $i => $row) {
     $roster[$i]['has_data'] = $row['status'] === 'completed' || !empty($row['draft_project_id']) || !empty($row['wg_status'])
         || !empty($row['quiz_open_started']) || (int) $row['quiz_attempts_total'] > 0 || !empty($row['project_id']) || !empty($row['quiz_attempt_id']);
     $roster[$i]['can_return'] = $row['status'] === 'completed' && !empty($row['project_id']);
+    // Calificada (o marcada completa) por el profesor pero el estudiante nunca envió nada
+    $roster[$i]['no_real_delivery'] = $row['status'] === 'completed' && !report_is_delivered($assignment, $row);
     $progressCounts[$roster[$i]['progress']['state']]++;
 }
 $isCreationAssignment = empty($assignment['activity_id']) && empty($assignment['quiz_id']);
@@ -382,6 +386,10 @@ require __DIR__ . '/../includes/header.php';
                                     <?= $r['completed_at'] ? '· ' . e(date('d/m/Y H:i', strtotime($r['completed_at']))) : '' ?>
                                     <?= $r['reviewed_at'] ? '· ajustada por el profesor' : '· calificación automática' ?>
                                     <?= $r['wg_status'] === 'completed' ? '· ' . (int) $r['wg_correct'] . ' de ' . (int) $r['wg_total'] . ' palabras' : '' ?>
+                                    <?php if ($r['no_real_delivery']): ?>
+                                        <span style="display:inline-block; padding:1px 10px; border-radius:999px; font-weight:600; font-size:0.78rem; background:#F3E8FF; color:#6B21A8; border:1px dashed #A855F7;"
+                                              title="La nota la puso el profesor; no hay una entrega del estudiante">⚠️ Nota sin entrega del estudiante</span>
+                                    <?php endif; ?>
                                 <?php else:
                                     $pg = $r['progress'];
                                     $badge = [
