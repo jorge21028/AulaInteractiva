@@ -31,6 +31,9 @@ if (empty($data['slides'])) {
 // Trabajos guardados con URL absoluta: se pasan a ruta local para que la imagen cargue en cualquier dirección del sitio.
 $data = project_localize_data($data, 'presentacion');
 $isSubmitted = $project['status'] === 'submitted';
+// Fecha de entrega vencida / curso inactivo: el trabajo queda en solo lectura
+$deadlineLocked = !$isSubmitted && assignment_lock_reason($pdo, $project['assignment_id'] ? (int) $project['assignment_id'] : null, (int) $studentId) !== null;
+$isSubmitted = $isSubmitted || $deadlineLocked;
 
 $pageTitle = $project['title'];
 require __DIR__ . '/../includes/header.php';
@@ -110,7 +113,7 @@ require __DIR__ . '/../includes/header.php';
     </div>
 
     <?php if ($isSubmitted): ?>
-        <p class="alert alert-success" style="margin-top:16px;">Este trabajo ya fue entregado y no se puede modificar.</p>
+        <p class="alert alert-success" style="margin-top:16px;"><?= $deadlineLocked ? 'La fecha de entrega venció: este trabajo ya no se puede modificar ni entregar.' : 'Este trabajo ya fue entregado y no se puede modificar.' ?></p>
     <?php else: ?>
         <div class="no-print" style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; align-items:center;">
             <button class="btn btn-secondary" id="btn-save" style="margin:0;">Guardar borrador</button>

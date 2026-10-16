@@ -32,17 +32,20 @@ function wga_load_assignment(PDO $pdo, int $assignmentId, int $studentId): ?arra
          FROM assignments a
          INNER JOIN activities act ON act.id = a.activity_id
          INNER JOIN submissions sub ON sub.assignment_id = a.id AND sub.student_id = :student_id
+         INNER JOIN subjects sj ON sj.id = a.subject_id
+         INNER JOIN courses cc ON cc.id = sj.course_id AND cc.is_active = 1
          WHERE a.id = :id AND act.game_mode IN ('ahorcado', 'crucigrama')
+           AND (a.start_date IS NULL OR a.start_date <= :now)
          LIMIT 1"
     );
-    $stmt->execute(['id' => $assignmentId, 'student_id' => $studentId]);
+    $stmt->execute(['id' => $assignmentId, 'student_id' => $studentId, 'now' => now_datetime()]);
     $row = $stmt->fetch();
     return $row ?: null;
 }
 
 function wga_is_overdue(array $assignment): bool
 {
-    return !empty($assignment['due_date']) && strtotime($assignment['due_date']) < time();
+    return !empty($assignment['due_date']) && $assignment['due_date'] < now_datetime();
 }
 
 /** Devuelve el intento del estudiante, creándolo la primera vez. */

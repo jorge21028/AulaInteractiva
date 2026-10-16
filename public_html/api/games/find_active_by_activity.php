@@ -24,10 +24,13 @@ $pdo = Database::getConnection();
 $check = $pdo->prepare(
     'SELECT 1 FROM assignment_students ast
      INNER JOIN assignments a ON a.id = ast.assignment_id
+     INNER JOIN subjects sj ON sj.id = a.subject_id
+     INNER JOIN courses cc ON cc.id = sj.course_id AND cc.is_active = 1
      WHERE ast.student_id = :student_id AND a.activity_id = :activity_id
+       AND (a.start_date IS NULL OR a.start_date <= :now)
      LIMIT 1'
 );
-$check->execute(['student_id' => current_user_id(), 'activity_id' => $activityId]);
+$check->execute(['student_id' => current_user_id(), 'activity_id' => $activityId, 'now' => now_datetime()]);
 
 if (!$check->fetch()) {
     json_response(['success' => false, 'message' => 'No tienes esta actividad asignada.'], 403);

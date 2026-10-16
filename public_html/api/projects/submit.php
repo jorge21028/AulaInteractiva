@@ -26,6 +26,17 @@ if ($projectId <= 0) {
 }
 
 $pdo = Database::getConnection();
+
+$lock = $pdo->prepare('SELECT assignment_id FROM student_projects WHERE id = :id AND student_id = :sid');
+$lock->execute(['id' => $projectId, 'sid' => current_user_id()]);
+$lockRow = $lock->fetch();
+if ($lockRow) {
+    $reason = assignment_lock_reason($pdo, $lockRow['assignment_id'] ? (int) $lockRow['assignment_id'] : null, (int) current_user_id());
+    if ($reason !== null) {
+        json_response(['success' => false, 'message' => $reason], 403);
+    }
+}
+
 $ok = project_submit($pdo, $projectId, current_user_id());
 
 if (!$ok) {

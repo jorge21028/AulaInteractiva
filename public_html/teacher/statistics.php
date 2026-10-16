@@ -9,7 +9,7 @@ $pdo = Database::getConnection();
 $teacherId = current_user_id();
 
 // ---- Totales generales ----
-$stmt = $pdo->prepare('SELECT COUNT(*) AS t FROM teacher_courses WHERE teacher_id = :id');
+$stmt = $pdo->prepare('SELECT COUNT(*) AS t FROM teacher_courses tc INNER JOIN courses c ON c.id = tc.course_id AND c.is_active = 1 WHERE tc.teacher_id = :id');
 $stmt->execute(['id' => $teacherId]);
 $courseCount = (int) $stmt->fetch()['t'];
 

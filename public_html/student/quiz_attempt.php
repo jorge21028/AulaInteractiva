@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/quiz_helpers.php';
+require_once __DIR__ . '/../includes/availability_helpers.php';
 
 require_role('student');
 
@@ -17,9 +18,11 @@ $stmt = $pdo->prepare(
      FROM assignments a
      INNER JOIN quizzes qz ON qz.id = a.quiz_id
      INNER JOIN assignment_students ast ON ast.assignment_id = a.id AND ast.student_id = :student_id
-     WHERE a.id = :assignment_id LIMIT 1"
+     INNER JOIN subjects sj ON sj.id = a.subject_id
+     INNER JOIN courses cc ON cc.id = sj.course_id AND cc.is_active = 1
+     WHERE a.id = :assignment_id AND (a.start_date IS NULL OR a.start_date <= :now) LIMIT 1"
 );
-$stmt->execute(['assignment_id' => $assignmentId, 'student_id' => $studentId]);
+$stmt->execute(['assignment_id' => $assignmentId, 'student_id' => $studentId, 'now' => now_datetime()]);
 $row = $stmt->fetch();
 
 if (!$row || $row['status'] !== 'published') {
@@ -37,7 +40,7 @@ $quiz = [
     'questions_per_attempt' => $row['questions_per_attempt'] !== null ? (int) $row['questions_per_attempt'] : null,
 ];
 
-$isOverdue = $row['due_date'] && strtotime($row['due_date']) < time();
+$isOverdue = assignment_is_past_due($row);
 $errors = [];
 $reviewOnly = isset($_GET['review']);
 

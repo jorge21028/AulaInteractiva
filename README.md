@@ -180,3 +180,11 @@ El proyecto se renombró de "AulaInteractiva" a **Dynamic SGA**, aplicando la l�
 - Todo esto (generación automática del código, auto-matrícula, relleno automático de asignaciones previas, bloqueo de inscripción duplicada, código inválido rechazado, y regeneración invalidando el código anterior) fue probado de extremo a extremo con base de datos real antes de la entrega.
 
 Posibles ampliaciones futuras: fichas de estudio, preguntas con audio/video como estímulo, modo por equipos, arrastrar-y-soltar real para relacionar, integración con Google Classroom/Moodle, y una versión verdaderamente asíncrona de las actividades interactivas (sin depender de una sesión en vivo).
+
+## Fase 12 — Disponibilidad por fecha/hora, edición, cursos inactivos e importación
+
+- **Inicio y entrega con hora**: `assignments.start_date` / `due_date` ya eran DATETIME; ahora el formulario pide fecha **y hora**. Antes de la hora de inicio la asignación no existe para el estudiante (panel, página directa, cuestionarios, juegos de palabras, editores, partidas en vivo). Pasada la hora de entrega se muestra como **Vencida** y se bloquea guardar, subir archivos y entregar (API y editores en solo lectura). Una entrega que el profesor devuelve para corregir se considera reabierta. Helpers en `includes/availability_helpers.php`.
+- **Editar asignaciones**: `teacher/assignment_edit.php` (título, instrucciones, inicio, entrega, puntaje).
+- **Cursos inactivos**: columna `courses.is_active` (`database/schema_fase12.sql`). Los estudiantes no ven el curso, sus materiales ni pueden matricularse con su código. El profesor los ve en `teacher/inactive_courses.php` y los reactiva desde allí o desde *Ajustes* del curso.
+- **Importar contenido**: `teacher/import_content.php` + `includes/import_helpers.php`. Copia actividades interactivas y cuestionarios (con preguntas, opciones e imágenes) de cualquier curso del profesor, activo o inactivo, a una asignatura de un curso activo: todo el curso o solo lo marcado.
+- **Zona horaria opcional**: define `APP_TIMEZONE` en `config/env.php` (ej. `'America/Santo_Domingo'`) si la hora del servidor no coincide con la tuya.

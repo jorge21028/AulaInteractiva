@@ -39,6 +39,13 @@ foreach ($requiredConstants as $const) {
 // ---- Configuración general de la aplicación ----
 define('APP_NAME', 'Dynamic SGA');
 
+// Zona horaria (opcional). Si defines APP_TIMEZONE en env.php (ej: 'America/Santo_Domingo'),
+// todas las fechas y horas de la aplicación (inicio/entrega de asignaciones) usan esa zona.
+// Si no la defines, se conserva el comportamiento anterior (la del servidor).
+if (defined('APP_TIMEZONE')) {
+    @date_default_timezone_set(APP_TIMEZONE);
+}
+
 // APP_ENV y APP_URL: se definen en env.php. Si por alguna razón no
 // se definieron ahí, usamos un valor por defecto seguro.
 if (!defined('APP_ENV')) {

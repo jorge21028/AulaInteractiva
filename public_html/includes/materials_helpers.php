@@ -228,7 +228,7 @@ function materials_file_for_user(PDO $pdo, int $fileId, int $userId, string $rol
     if ($role === 'teacher') {
         $sql .= ' AND EXISTS (SELECT 1 FROM teacher_courses tc WHERE tc.course_id = s.course_id AND tc.teacher_id = :uid)';
     } elseif ($role === 'student') {
-        $sql .= ' AND EXISTS (SELECT 1 FROM course_students cs WHERE cs.course_id = s.course_id AND cs.student_id = :uid)';
+        $sql .= ' AND EXISTS (SELECT 1 FROM course_students cs INNER JOIN courses cc ON cc.id = cs.course_id AND cc.is_active = 1 WHERE cs.course_id = s.course_id AND cs.student_id = :uid)';
     } else {
         return null;
     }
@@ -245,7 +245,7 @@ function materials_subject_for_student(PDO $pdo, int $subjectId, int $studentId)
          FROM subjects s
          INNER JOIN courses c ON c.id = s.course_id
          INNER JOIN course_students cs ON cs.course_id = c.id
-         WHERE s.id = :sid AND cs.student_id = :uid LIMIT 1'
+         WHERE s.id = :sid AND cs.student_id = :uid AND c.is_active = 1 LIMIT 1'
     );
     $stmt->execute(['sid' => $subjectId, 'uid' => $studentId]);
     return $stmt->fetch() ?: null;

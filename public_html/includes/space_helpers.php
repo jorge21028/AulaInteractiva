@@ -18,6 +18,7 @@ if (!defined('AULA_APP')) {
 
 require_once __DIR__ . '/game_helpers.php';
 require_once __DIR__ . '/project_helpers.php';
+require_once __DIR__ . '/availability_helpers.php';
 
 const SPACE_PALETTE = [
     ['#0878F9', '#7B2CFF'], ['#00B894', '#0984E3'], ['#F59E0B', '#EF4444'], ['#7B2CFF', '#EC4899'],
@@ -37,7 +38,7 @@ function space_gradient(int $id): string
  */
 function space_assignment_rows(PDO $pdo, int $teacherId, ?int $courseId = null, ?int $subjectId = null): array
 {
-    $sql = 'SELECT a.id, a.title, a.due_date, a.points, a.project_type, a.activity_id, a.quiz_id, a.created_at, a.subject_id, a.audience,
+    $sql = 'SELECT a.id, a.title, a.start_date, a.due_date, a.points, a.project_type, a.activity_id, a.quiz_id, a.created_at, a.subject_id, a.audience,
                    s.name AS subject_name, s.course_id, act.title AS activity_title, act.game_mode, qz.title AS quiz_title,
                    COUNT(sub.id) AS total,
                    COALESCE(SUM(sub.status = \'completed\'), 0) AS completed,
@@ -69,10 +70,11 @@ function space_assignment_rows(PDO $pdo, int $teacherId, ?int $courseId = null, 
         $r['needs_grading'] = (int) $r['needs_grading'];
         $r['graded'] = max(0, $r['completed'] - $r['needs_grading']);
         $r['pending'] = max(0, $r['total'] - $r['completed']);
+        $r['is_scheduled'] = !assignment_has_started($r);   // aún no inicia: los estudiantes no la ven
         $r['is_needs'] = $r['needs_grading'] > 0;
-        $r['is_pending'] = $r['pending'] > 0;
+        $r['is_pending'] = $r['pending'] > 0 && !$r['is_scheduled'];
         $r['is_done'] = $r['total'] > 0 && $r['pending'] === 0 && $r['needs_grading'] === 0;
-        $r['is_overdue'] = $r['is_pending'] && !empty($r['due_date']) && strtotime($r['due_date']) < time();
+        $r['is_overdue'] = $r['is_pending'] && assignment_is_past_due($r);
     }
     unset($r);
 
@@ -83,10 +85,11 @@ function space_assignment_rows(PDO $pdo, int $teacherId, ?int $courseId = null, 
 function space_summarize(array $rows): array
 {
     $sum = [
-        'assignments' => count($rows), 'needs_assignments' => 0, 'pending_assignments' => 0, 'done_assignments' => 0,
+        'assignments' => count($rows), 'scheduled_assignments' => 0, 'needs_assignments' => 0, 'pending_assignments' => 0, 'done_assignments' => 0,
         'needs_submissions' => 0, 'pending_submissions' => 0, 'graded_submissions' => 0, 'total_submissions' => 0,
     ];
     foreach ($rows as $r) {
+        $sum['scheduled_assignments'] += !empty($r['is_scheduled']) ? 1 : 0;
         $sum['needs_assignments'] += $r['is_needs'] ? 1 : 0;
         $sum['pending_assignments'] += $r['is_pending'] ? 1 : 0;
         $sum['done_assignments'] += $r['is_done'] ? 1 : 0;
@@ -122,6 +125,10 @@ function space_status_chips(array $sum): string
     if ($sum['pending_assignments'] > 0) {
         $n = $sum['pending_assignments'];
         $html .= '<span class="chip chip-amber">⏳ ' . $n . ($n === 1 ? ' con entregas pendientes' : ' con entregas pendientes') . '</span>';
+    }
+    if ($sum['scheduled_assignments'] > 0) {
+        $n = $sum['scheduled_assignments'];
+        $html .= '<span class="chip chip-blue">🕒 ' . $n . ($n === 1 ? ' programada' : ' programadas') . '</span>';
     }
     if ($sum['needs_assignments'] === 0 && $sum['pending_assignments'] === 0) {
         $html .= '<span class="chip chip-green">✅ Al día</span>';

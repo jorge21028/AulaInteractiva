@@ -4,6 +4,7 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/game_helpers.php'; // iconos de modos de juego
 require_once __DIR__ . '/../includes/assignment_helpers.php';
+require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
 require_once __DIR__ . '/../includes/space_helpers.php';
 require_once __DIR__ . '/../includes/submission_admin_helpers.php'; // estudiantes del curso
@@ -20,7 +21,7 @@ $subjStmt = $pdo->prepare(
      FROM subjects s
      INNER JOIN courses c ON c.id = s.course_id
      INNER JOIN teacher_courses tc ON tc.course_id = c.id
-     WHERE tc.teacher_id = :teacher_id
+     WHERE tc.teacher_id = :teacher_id AND c.is_active = 1
      ORDER BY c.name, s.name'
 );
 $subjStmt->execute(['teacher_id' => $teacherId]);
@@ -55,8 +56,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
     $mode = clean_string($_POST['mode'] ?? 'interactive'); // 'interactive' | 'quiz' | 'creation'
     $title = clean_string($_POST['title'] ?? '');
     $description = clean_string($_POST['description'] ?? '');
-    $startDate = clean_string($_POST['start_date'] ?? '');
-    $dueDate = clean_string($_POST['due_date'] ?? '');
+    $startRaw = clean_string($_POST['start_date'] ?? '');
+    $dueRaw = clean_string($_POST['due_date'] ?? '');
+    $startDate = dt_from_input($startRaw);
+    $dueDate = dt_from_input($dueRaw, true);
+    if ($startRaw !== '' && $startDate === null) {
+        $errors[] = 'La fecha y hora de inicio no son válidas.';
+    }
+    if ($dueRaw !== '' && $dueDate === null) {
+        $errors[] = 'La fecha y hora de entrega no son válidas.';
+    }
+    if ($startDate !== null && $dueDate !== null && $dueDate <= $startDate) {
+        $errors[] = 'La fecha y hora de entrega deben ser posteriores a las de inicio.';
+    }
     $points = max(1, (int) ($_POST['points'] ?? 100));
 
     $activityId = null;
@@ -133,8 +145,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
             $assignmentId = assignment_create(
                 $pdo, $teacherId, $subjectId, $activityId,
                 $title, $description,
-                $startDate !== '' ? $startDate . ' 00:00:00' : null,
-                $dueDate !== '' ? $dueDate . ' 23:59:59' : null,
+                $startDate,
+                $dueDate,
                 $points,
                 $projectType,
                 $quizId,
@@ -295,11 +307,18 @@ require __DIR__ . '/../includes/header.php';
             <label for="description">Descripción / instrucciones</label>
             <textarea id="description" name="description" rows="2"></textarea>
 
-            <label for="start_date">Fecha de inicio (opcional)</label>
-            <input type="date" id="start_date" name="start_date">
+            <label for="start_date">Fecha y hora de inicio (opcional)</label>
+            <input type="datetime-local" id="start_date" name="start_date" value="<?= e((string) ($_POST['start_date'] ?? '')) ?>">
+            <p class="text-muted" style="font-size:0.8rem; margin:2px 0 10px;">
+                Hasta que llegue esta fecha y hora, los estudiantes <strong>no ven</strong> la asignación (solo tú). Si la dejas vacía, se muestra desde ya.
+            </p>
 
-            <label for="due_date">Fecha de entrega (opcional)</label>
-            <input type="date" id="due_date" name="due_date">
+            <label for="due_date">Fecha y hora de entrega (opcional)</label>
+            <input type="datetime-local" id="due_date" name="due_date" value="<?= e((string) ($_POST['due_date'] ?? '')) ?>">
+            <p class="text-muted" style="font-size:0.8rem; margin:2px 0 10px;">
+                Pasada esta fecha y hora, los estudiantes la ven como <strong>vencida</strong> y ya no pueden entregar ni subir nada.
+                Hora actual del servidor: <strong><?= e(dt_format(now_datetime())) ?></strong> (si no coincide con tu reloj, avísame para ajustar la zona horaria).
+            </p>
 
             <label for="points">Puntuación</label>
             <input type="text" id="points" name="points" value="100">

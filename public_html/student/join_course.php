@@ -22,6 +22,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$course) {
             $errors[] = 'No existe ningún curso con ese código. Verifícalo con tu profesor.';
+        } elseif ((int) ($course['is_active'] ?? 1) !== 1) {
+            $errors[] = 'Este curso no está disponible por ahora. Consulta con tu profesor.';
         } else {
             $result = course_enroll_student($pdo, (int) $course['id'], $studentId);
             if ($result['success']) {

@@ -4,6 +4,7 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/word_play_helpers.php'; // límite de palabras por estudiante
 require_once __DIR__ . '/../includes/project_helpers.php';
+require_once __DIR__ . '/../includes/availability_helpers.php';
 
 require_role('student');
 
@@ -14,11 +15,12 @@ $assignmentId = (int) ($_GET['id'] ?? 0);
 $stmt = $pdo->prepare(
     'SELECT a.*, act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, act.words_per_attempt, qz.id AS quiz_id, qz.title AS quiz_title,
         qz.time_limit_minutes, qz.max_attempts, s.name AS subject_name,
-        sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id, sub.returned_at, sub.return_note
+        c.is_active AS course_active, sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id, sub.returned_at, sub.return_note
      FROM assignments a
      LEFT JOIN activities act ON act.id = a.activity_id
      LEFT JOIN quizzes qz ON qz.id = a.quiz_id
      INNER JOIN subjects s ON s.id = a.subject_id
+     INNER JOIN courses c ON c.id = s.course_id
      INNER JOIN submissions sub ON sub.assignment_id = a.id AND sub.student_id = :student_id
      WHERE a.id = :id LIMIT 1'
 );
@@ -30,7 +32,14 @@ if (!$assignment) {
     exit('Asignación no encontrada o no te pertenece.');
 }
 
-$isOverdue = $assignment['due_date'] && strtotime($assignment['due_date']) < time();
+// Curso inactivo o asignación que aún no inicia: para el estudiante no existe todavía.
+if ((int) $assignment['course_active'] !== 1 || !assignment_has_started($assignment)) {
+    http_response_code(404);
+    exit('Esta asignación no está disponible.');
+}
+
+// Vencida = pasó la fecha/hora de entrega y no está entregada (salvo que el profesor la devolvió para corregir).
+$isOverdue = assignment_overdue_for_student($assignment, $assignment) || ($assignment['status'] === 'completed' && assignment_is_past_due($assignment));
 $isQuiz = $assignment['quiz_id'] !== null;
 $isCreation = $assignment['activity_id'] === null && !$isQuiz;
 $isWordGame = in_array($assignment['game_mode'] ?? null, ['ahorcado', 'crucigrama'], true); // se juega solo, sin partida en vivo
@@ -61,9 +70,16 @@ if ($isQuiz) {
 // exista el borrador para poder enlazar directo al editor.
 $project = null;
 if ($isCreation && $assignment['status'] !== 'completed') {
-    $project = project_find_or_create_for_assignment(
-        $pdo, $assignmentId, $studentId, $assignment['project_type'], $assignment['title']
-    );
+    if ($isOverdue) {
+        // Vencida: no se crea un borrador nuevo; solo se busca el que ya tenía (para verlo en solo lectura)
+        $pStmt = $pdo->prepare('SELECT * FROM student_projects WHERE assignment_id = :aid AND student_id = :sid LIMIT 1');
+        $pStmt->execute(['aid' => $assignmentId, 'sid' => $studentId]);
+        $project = $pStmt->fetch() ?: null;
+    } else {
+        $project = project_find_or_create_for_assignment(
+            $pdo, $assignmentId, $studentId, $assignment['project_type'], $assignment['title']
+        );
+    }
 }
 
 $editorUrlByType = [
@@ -92,8 +108,8 @@ require __DIR__ . '/../includes/header.php';
     ·
     <?= (int) $assignment['points'] ?> pts
     <?php if ($assignment['due_date']): ?>
-        · Entrega: <?= e(date('d/m/Y', strtotime($assignment['due_date']))) ?>
-        <?= $isOverdue ? ' <span style="color:var(--color-danger);">(vencida)</span>' : '' ?>
+        · Entrega: <?= e(dt_format($assignment['due_date'])) ?>
+        <?= ($isOverdue && $assignment['status'] !== 'completed') ? ' <span style="color:var(--color-danger); font-weight:700;">(vencida)</span>' : '' ?>
     <?php endif; ?>
 </p>
 
@@ -139,6 +155,17 @@ require __DIR__ . '/../includes/header.php';
                     Intentar de nuevo (<?= $quizAttemptsUsed ?>/<?= (int) $assignment['max_attempts'] ?> usados)
                 </a>
             <?php endif; ?>
+        <?php endif; ?>
+    </div>
+<?php elseif ($isCreation && $isOverdue): ?>
+    <div class="card" style="text-align:center; border-color:#F8C9C9; background:#FFF8F8;">
+        <h2 style="margin-top:0; color:#B91C1C;">⌛ Vencida</h2>
+        <p class="text-muted">La fecha de entrega ya pasó (<?= e(dt_format($assignment['due_date'])) ?>), así que ya no se puede entregar ni modificar este trabajo.
+            Si necesitas más tiempo, habla con tu profesor.</p>
+        <?php if ($project): ?>
+            <a class="btn btn-secondary" href="<?= e(rtrim(APP_URL, '/')) ?>/editor/<?= e($editorUrlByType[$assignment['project_type']] ?? '') ?>?project_id=<?= (int) $project['id'] ?>">
+                Ver mi borrador (solo lectura)
+            </a>
         <?php endif; ?>
     </div>
 <?php elseif ($isCreation): ?>
@@ -191,6 +218,12 @@ require __DIR__ . '/../includes/header.php';
                 <?= $quizAttemptsUsed > 0 ? 'Continuar' : 'Comenzar cuestionario' ?>
             </a>
         <?php endif; ?>
+    </div>
+<?php elseif ($isOverdue): ?>
+    <div class="card" style="text-align:center; border-color:#F8C9C9; background:#FFF8F8;">
+        <h2 style="margin-top:0; color:#B91C1C;">⌛ Vencida</h2>
+        <p class="text-muted">La fecha de entrega ya pasó (<?= e(dt_format($assignment['due_date'])) ?>) y esta actividad no se completó a tiempo.
+            Si necesitas más tiempo, habla con tu profesor.</p>
     </div>
 <?php else: ?>
     <div class="card" id="pending-panel" style="text-align:center;">

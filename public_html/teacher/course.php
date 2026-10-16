@@ -4,6 +4,7 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/course_helpers.php';
 require_once __DIR__ . '/../includes/space_helpers.php';
+require_once __DIR__ . '/../includes/availability_helpers.php';
 
 require_role('teacher');
 
@@ -13,7 +14,7 @@ $courseId = (int) ($_GET['id'] ?? 0);
 
 // Verificar que el curso pertenece a este profesor
 $stmt = $pdo->prepare(
-    'SELECT c.id, c.name, c.enrollment_code FROM courses c
+    'SELECT c.id, c.name, c.enrollment_code, c.is_active, c.deactivated_at FROM courses c
      INNER JOIN teacher_courses tc ON tc.course_id = c.id
      WHERE c.id = :course_id AND tc.teacher_id = :teacher_id LIMIT 1'
 );
@@ -53,6 +54,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             audit_log($pdo, $teacherId, 'create_subject', "Asignatura '{$name}' en curso #{$courseId}");
             redirect('teacher/course.php?id=' . $courseId);
         }
+    }
+
+    if ($action === 'deactivate_course') {
+        course_set_active($pdo, $courseId, $teacherId, false);
+        audit_log($pdo, $teacherId, 'deactivate_course', "Curso #{$courseId} desactivado");
+        redirect('teacher/inactive_courses.php?deactivated=1');
+    }
+
+    if ($action === 'activate_course') {
+        course_set_active($pdo, $courseId, $teacherId, true);
+        audit_log($pdo, $teacherId, 'activate_course', "Curso #{$courseId} reactivado");
+        redirect('teacher/dashboard.php?reactivated=1');
     }
 
     if ($action === 'rename_course') {
@@ -202,6 +215,12 @@ $self = 'course.php?id=' . (int) $courseId;
     <a class="btn btn-secondary" href="assignments.php">➕ Nueva asignación</a>
 </div>
 
+<?php if ((int) $course['is_active'] !== 1): ?>
+    <div class="alert" style="background:#FFF7ED; border:1px solid #FED7AA; color:#9A3412;">
+        📦 <strong>Este curso está inactivo.</strong> Los estudiantes no lo ven y el código de matrícula no funciona.
+        Tú conservas todo (asignaturas, asignaciones y notas). Puedes reactivarlo en la pestaña <a href="<?= e($self) ?>&tab=settings">Ajustes</a>.
+    </div>
+<?php endif; ?>
 <?php foreach ($errors as $error): ?>
     <div class="alert alert-error"><?= e($error) ?></div>
 <?php endforeach; ?>
@@ -335,7 +354,33 @@ $self = 'course.php?id=' . (int) $courseId;
     </section>
 
 <?php else: ?>
-    <section class="card">
+    <section class="card" style="border-color:<?= (int) $course['is_active'] === 1 ? 'var(--color-border)' : '#FED7AA' ?>;">
+        <h2 style="margin-top:0;">Estado del curso</h2>
+        <?php if ((int) $course['is_active'] === 1): ?>
+            <p class="text-muted" style="margin-top:0;">
+                <strong>Activo.</strong> Si el curso ya terminó, puedes pasarlo a inactivo: los estudiantes dejan de verlo
+                y tú lo encuentras en <a href="inactive_courses.php">Cursos inactivos</a>, donde puedes seguir consultando
+                sus notas o importar su contenido a otros cursos. No se borra nada.
+            </p>
+            <form method="post" action="<?= e($self) ?>&tab=settings" onsubmit="return confirm('¿Pasar este curso a inactivo? Los estudiantes dejarán de verlo (puedes reactivarlo cuando quieras).')">
+                <?php csrf_field(); ?>
+                <input type="hidden" name="action" value="deactivate_course">
+                <button type="submit" class="btn btn-secondary" style="margin:0; color:#9A3412; border-color:#9A3412;">📦 Pasar a inactivo</button>
+            </form>
+        <?php else: ?>
+            <p class="text-muted" style="margin-top:0;">
+                <strong>Inactivo</strong><?= !empty($course['deactivated_at']) ? ' desde el ' . e(dt_format($course['deactivated_at'])) : '' ?>.
+                Los estudiantes no lo ven.
+            </p>
+            <form method="post" action="<?= e($self) ?>&tab=settings">
+                <?php csrf_field(); ?>
+                <input type="hidden" name="action" value="activate_course">
+                <button type="submit" class="btn" style="margin:0;">✅ Reactivar curso</button>
+            </form>
+        <?php endif; ?>
+    </section>
+
+    <section class="card" style="margin-top:16px;">
         <h2 style="margin-top:0;">Nombre del curso</h2>
         <form method="post" action="<?= e($self) ?>&tab=settings" style="max-width:420px;">
             <?php csrf_field(); ?>

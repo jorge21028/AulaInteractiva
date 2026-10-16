@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
+require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/submission_admin_helpers.php';
 require_once __DIR__ . '/../includes/report_helpers.php'; // ¿el estudiante realmente envió la asignación?
 
@@ -316,10 +317,27 @@ require __DIR__ . '/../includes/header.php';
     <?php endif; ?>
     ·
     <?= (int) $assignment['points'] ?> pts
+    <?php if ($assignment['start_date']): ?>
+        · Inicia: <?= e(dt_format($assignment['start_date'])) ?>
+    <?php endif; ?>
     <?php if ($assignment['due_date']): ?>
-        · Entrega: <?= e(date('d/m/Y', strtotime($assignment['due_date']))) ?>
+        · Entrega: <?= e(dt_format($assignment['due_date'])) ?>
     <?php endif; ?>
 </p>
+<?php if (!empty($_GET['updated'])): ?>
+    <div class="alert alert-success">Cambios guardados.</div>
+<?php endif; ?>
+<?php $windowState = assignment_window_state($assignment); ?>
+<?php if ($windowState === 'scheduled'): ?>
+    <div class="alert" style="background:#EEF2FF; border:1px solid #C7D2FE; color:#3730A3;">
+        🕒 <strong>Programada.</strong> Los estudiantes todavía no la ven: aparecerá automáticamente el <?= e(dt_format($assignment['start_date'])) ?>.
+    </div>
+<?php elseif ($windowState === 'closed'): ?>
+    <div class="alert alert-error">
+        ⌛ <strong>Vencida.</strong> Los estudiantes la ven como vencida y ya no pueden entregar. Si quieres darles más tiempo, edita la fecha de entrega.
+    </div>
+<?php endif; ?>
+<p><a class="btn btn-secondary" href="assignment_edit.php?id=<?= (int) $assignmentId ?>">✏️ Editar asignación</a></p>
 
 <?php if ($assignment['description']): ?>
     <div class="card"><?= nl2br(e($assignment['description'])) ?></div>

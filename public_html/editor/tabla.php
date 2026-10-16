@@ -26,6 +26,9 @@ if (!$project) {
 
 $data = json_decode($project['data_json'], true) ?: ['columns' => ['Criterio', 'Opción A'], 'rows' => [['', '']]];
 $isSubmitted = $project['status'] === 'submitted';
+// Fecha de entrega vencida / curso inactivo: el trabajo queda en solo lectura
+$deadlineLocked = !$isSubmitted && assignment_lock_reason($pdo, $project['assignment_id'] ? (int) $project['assignment_id'] : null, (int) $studentId) !== null;
+$isSubmitted = $isSubmitted || $deadlineLocked;
 
 $pageTitle = $project['title'];
 require __DIR__ . '/../includes/header.php';
@@ -61,7 +64,7 @@ require __DIR__ . '/../includes/header.php';
         <div class="no-print" style="margin-top:16px;">
             <button type="button" class="btn btn-secondary" onclick="window.print()">Imprimir / Guardar como PDF</button>
         </div>
-        <p class="alert alert-success" style="margin-top:16px;">Este trabajo ya fue entregado y no se puede modificar.</p>
+        <p class="alert alert-success" style="margin-top:16px;"><?= $deadlineLocked ? 'La fecha de entrega venció: este trabajo ya no se puede modificar ni entregar.' : 'Este trabajo ya fue entregado y no se puede modificar.' ?></p>
     <?php else: ?>
         <div style="display:flex; gap:10px; margin:16px 0; flex-wrap:wrap;">
             <button class="btn btn-secondary" id="btn-add-col" style="margin:0;">+ Columna</button>

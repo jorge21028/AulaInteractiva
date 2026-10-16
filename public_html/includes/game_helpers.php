@@ -373,6 +373,19 @@ function game_join_student(PDO $pdo, string $code, int $studentId, string $nickn
         return ['success' => false, 'message' => 'Esta partida ya finalizó.', 'game' => $game];
     }
 
+    // Si el curso de la actividad está inactivo, los estudiantes no pueden entrar.
+    $activeStmt = $pdo->prepare(
+        'SELECT c.is_active FROM activities act
+         INNER JOIN subjects s ON s.id = act.subject_id
+         INNER JOIN courses c ON c.id = s.course_id
+         WHERE act.id = :activity_id LIMIT 1'
+    );
+    $activeStmt->execute(['activity_id' => $game['activity_id']]);
+    $activeRow = $activeStmt->fetch();
+    if ($activeRow && (int) $activeRow['is_active'] !== 1) {
+        return ['success' => false, 'message' => 'Este curso no está disponible por ahora.', 'game' => $game];
+    }
+
     $check = $pdo->prepare('SELECT id FROM game_players WHERE game_id = :game_id AND student_id = :student_id');
     $check->execute(['game_id' => $game['id'], 'student_id' => $studentId]);
 

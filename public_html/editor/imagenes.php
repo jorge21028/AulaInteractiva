@@ -32,6 +32,9 @@ $data = json_decode($project['data_json'], true) ?: ['images' => []];
 $data = project_localize_data($data, 'imagenes');
 $images = is_array($data['images'] ?? null) ? $data['images'] : [];
 $isSubmitted = $project['status'] === 'submitted';
+// Fecha de entrega vencida / curso inactivo: el trabajo queda en solo lectura
+$deadlineLocked = !$isSubmitted && assignment_lock_reason($pdo, $project['assignment_id'] ? (int) $project['assignment_id'] : null, (int) $studentId) !== null;
+$isSubmitted = $isSubmitted || $deadlineLocked;
 
 $pageTitle = $project['title'];
 require __DIR__ . '/../includes/header.php';
@@ -71,7 +74,7 @@ require __DIR__ . '/../includes/header.php';
                 <?php endforeach; ?>
             </div>
         <?php endif; ?>
-        <p class="alert alert-success" style="margin-top:16px;">Este trabajo ya fue entregado y no se puede modificar.</p>
+        <p class="alert alert-success" style="margin-top:16px;"><?= $deadlineLocked ? 'La fecha de entrega venció: este trabajo ya no se puede modificar ni entregar.' : 'Este trabajo ya fue entregado y no se puede modificar.' ?></p>
     <?php else: ?>
         <div class="drop" id="drop">
             <p style="margin:0 0 10px; font-weight:600;">Agrega las fotos de tu tarea</p>

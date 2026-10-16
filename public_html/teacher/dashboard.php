@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/space_helpers.php';
+require_once __DIR__ . '/../includes/availability_helpers.php';
 
 require_role('teacher');
 
@@ -40,7 +41,7 @@ $stmt = $pdo->prepare(
         (SELECT COUNT(DISTINCT cs.student_id) FROM course_students cs WHERE cs.course_id = c.id) AS students_count
      FROM courses c
      INNER JOIN teacher_courses tc ON tc.course_id = c.id
-     WHERE tc.teacher_id = :teacher_id
+     WHERE tc.teacher_id = :teacher_id AND c.is_active = 1
      ORDER BY c.name ASC'
 );
 $stmt->execute(['teacher_id' => $teacherId]);
@@ -59,6 +60,7 @@ if ($totalCourses > 0) {
 }
 
 // Estado de cada curso (por calificar / entregas pendientes) para su mosaico
+$inactiveCount = courses_inactive_count($pdo, $teacherId);
 $courseStats = space_summarize_by(space_assignment_rows($pdo, $teacherId), 'course_id');
 
 $pageTitle = 'Panel del profesor';
@@ -90,6 +92,10 @@ require __DIR__ . '/../includes/header.php';
 
 <section style="margin-top:24px;">
     <h2 style="margin-bottom:4px;">Mis cursos</h2>
+    <?php if (!empty($_GET['reactivated'])): ?>
+        <div class="alert alert-success">Curso reactivado: los estudiantes vuelven a verlo.</div>
+    <?php endif; ?>
+    <p style="margin:0 0 8px;"><a class="btn btn-secondary" style="margin:0; padding:6px 14px; font-size:0.85rem;" href="inactive_courses.php">📦 Cursos inactivos (<?= (int) $inactiveCount ?>)</a></p>
     <p class="text-muted" style="margin-top:0;">Entra a un curso para ver sus asignaturas y el estado de cada asignación.</p>
 
     <?php foreach ($errors as $error): ?>

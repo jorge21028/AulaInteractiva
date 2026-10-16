@@ -137,6 +137,12 @@ function assignment_sync_from_game(PDO $pdo, int $gameId): void
     }
 
     foreach ($assignments as $assignment) {
+        // Si la partida empezó DESPUÉS de la fecha/hora de entrega, ya no cuenta para esta asignación.
+        $gameStart = $game['started_at'] ?: ($game['created_at'] ?? null);
+        if (!empty($assignment['due_date']) && $gameStart && $gameStart > $assignment['due_date']) {
+            continue;
+        }
+
         foreach ($players as $player) {
             $correctStmt = $pdo->prepare(
                 'SELECT COUNT(*) AS total FROM game_answers WHERE game_id = :game_id AND player_id = :player_id AND is_correct = 1'

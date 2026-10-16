@@ -2,6 +2,7 @@
 define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/availability_helpers.php';
 
 require_role('student');
 
@@ -12,7 +13,7 @@ $stmt = $pdo->prepare(
     'SELECT c.id AS course_id, c.name AS course_name
      FROM courses c
      INNER JOIN course_students cs ON cs.course_id = c.id
-     WHERE cs.student_id = :student_id
+     WHERE cs.student_id = :student_id AND c.is_active = 1
      ORDER BY c.name ASC'
 );
 $stmt->execute(['student_id' => $studentId]);
@@ -32,18 +33,26 @@ if (!empty($courses)) {
 
 // Todas las asignaciones de este estudiante, con su asignatura
 $allStmt = $pdo->prepare(
-    "SELECT a.id, a.title, a.due_date, a.points, a.subject_id, sub.status, sub.returned_at
+    "SELECT a.id, a.title, a.start_date, a.due_date, a.points, a.subject_id, sub.status, sub.returned_at
      FROM submissions sub
      INNER JOIN assignments a ON a.id = sub.assignment_id
      WHERE sub.student_id = :student_id
+       AND (a.start_date IS NULL OR a.start_date <= :now)
      ORDER BY a.due_date IS NULL, a.due_date ASC, a.title ASC"
 );
-$allStmt->execute(['student_id' => $studentId]);
+// Las asignaciones cuya fecha/hora de inicio aún no llega NO aparecen (solo las ve el profesor).
+$allStmt->execute(['student_id' => $studentId, 'now' => now_datetime()]);
 
 // Agrupadas por asignatura y estado, listas para renderizar sin más consultas
 $assignmentsBySubject = [];
 foreach ($allStmt->fetchAll() as $a) {
-    $bucket = $a['status'] === 'completed' ? 'completed' : 'pending';
+    if ($a['status'] === 'completed') {
+        $bucket = 'completed';
+    } elseif (assignment_overdue_for_student($a, $a)) {
+        $bucket = 'overdue';   // venció la entrega: se muestra como vencida y ya no se puede entregar
+    } else {
+        $bucket = 'pending';
+    }
     $assignmentsBySubject[$a['subject_id']][$bucket][] = $a;
 }
 
@@ -95,13 +104,17 @@ require __DIR__ . '/../includes/header.php';
                     <?php
                         $pending = $assignmentsBySubject[$subj['id']]['pending'] ?? [];
                         $completed = $assignmentsBySubject[$subj['id']]['completed'] ?? [];
+                        $overdue = $assignmentsBySubject[$subj['id']]['overdue'] ?? [];
                         $pendingCount = count($pending);
+                        $overdueCount = count($overdue);
                     ?>
                     <details style="margin-bottom:10px;" <?= $pendingCount > 0 ? 'open' : '' ?>>
                         <summary style="cursor:pointer; padding:8px 0; font-weight:600;">
                             <?= e($subj['name']) ?>
                             <?php if ($pendingCount > 0): ?>
                                 <span class="text-muted" style="font-weight:400;"> — <?= $pendingCount ?> pendiente<?= $pendingCount === 1 ? '' : 's' ?></span>
+                            <?php elseif ($overdueCount > 0): ?>
+                                <span style="font-weight:600; color:#B91C1C;"> — <?= $overdueCount ?> vencida<?= $overdueCount === 1 ? '' : 's' ?></span>
                             <?php else: ?>
                                 <span class="text-muted" style="font-weight:400;"> — al día</span>
                             <?php endif; ?>
@@ -126,8 +139,21 @@ require __DIR__ . '/../includes/header.php';
                                         <p class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">
                                             <?= (int) $a['points'] ?> pts
                                             <?php if ($a['due_date']): ?>
-                                                · Entrega: <?= e(date('d/m/Y', strtotime($a['due_date']))) ?>
+                                                · Entrega: <?= e(dt_format($a['due_date'])) ?>
                                             <?php endif; ?>
+                                        </p>
+                                    </a>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+
+                            <?php if (!empty($overdue)): ?>
+                                <h4 style="margin:14px 0 8px;">⌛ Vencidas</h4>
+                                <?php foreach ($overdue as $a): ?>
+                                    <a class="card" href="assignment.php?id=<?= (int) $a['id'] ?>" style="display:block; margin-bottom:6px; padding:10px 14px; border-color:#F8C9C9; background:#FFF8F8;">
+                                        <strong><?= e($a['title']) ?></strong>
+                                        <span style="display:inline-block; margin-left:6px; padding:1px 8px; border-radius:999px; font-size:0.75rem; font-weight:700; background:#FDECEC; color:#B91C1C; border:1px solid #F8C9C9;">Vencida</span>
+                                        <p class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">
+                                            <?= (int) $a['points'] ?> pts · Venció el <?= e(dt_format($a['due_date'])) ?> · ya no se puede entregar
                                         </p>
                                     </a>
                                 <?php endforeach; ?>

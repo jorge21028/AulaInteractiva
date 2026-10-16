@@ -14,6 +14,8 @@ if (!defined('AULA_APP')) {
     exit('Acceso directo no permitido.');
 }
 
+require_once __DIR__ . '/availability_helpers.php';
+
 const PROJECT_TYPES = [
     'resumen' => 'Resumen',
     'tabla_comparativa' => 'Tabla comparativa',
@@ -348,11 +350,15 @@ function project_find_or_create_for_assignment(PDO $pdo, int $assignmentId, int 
  */
 function project_save(PDO $pdo, int $projectId, int $studentId, array $data, ?string $title = null): bool
 {
-    $stmt = $pdo->prepare('SELECT status, type FROM student_projects WHERE id = :id AND student_id = :sid');
+    $stmt = $pdo->prepare('SELECT status, type, assignment_id FROM student_projects WHERE id = :id AND student_id = :sid');
     $stmt->execute(['id' => $projectId, 'sid' => $studentId]);
     $project = $stmt->fetch();
 
     if (!$project || $project['status'] === 'submitted') {
+        return false;
+    }
+    // Fecha de entrega vencida, asignación aún no disponible o curso inactivo
+    if (assignment_lock_reason($pdo, $project['assignment_id'] ? (int) $project['assignment_id'] : null, $studentId) !== null) {
         return false;
     }
 
@@ -383,6 +389,9 @@ function project_submit(PDO $pdo, int $projectId, int $studentId): bool
     $project = $stmt->fetch();
 
     if (!$project || $project['status'] === 'submitted') {
+        return false;
+    }
+    if (assignment_lock_reason($pdo, $project['assignment_id'] ? (int) $project['assignment_id'] : null, $studentId) !== null) {
         return false;
     }
 

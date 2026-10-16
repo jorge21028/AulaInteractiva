@@ -15,7 +15,7 @@ $subjStmt = $pdo->prepare(
      FROM subjects s
      INNER JOIN courses c ON c.id = s.course_id
      INNER JOIN teacher_courses tc ON tc.course_id = c.id
-     WHERE tc.teacher_id = :teacher_id
+     WHERE tc.teacher_id = :teacher_id AND c.is_active = 1
      ORDER BY c.name, s.name'
 );
 $subjStmt->execute(['teacher_id' => $teacherId]);

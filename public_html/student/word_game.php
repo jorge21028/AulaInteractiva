@@ -7,6 +7,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/word_play_helpers.php';
+require_once __DIR__ . '/../includes/availability_helpers.php';
 
 require_role('student');
 
@@ -32,7 +33,7 @@ require __DIR__ . '/../includes/header.php';
     <?= e(game_mode_label($assignment['game_mode'])) ?> · sin límite de tiempo · tu avance se guarda solo
     · <?= (int) $assignment['points'] ?> pts
     <?php if ($assignment['due_date']): ?>
-        · Entrega: <?= e(date('d/m/Y', strtotime($assignment['due_date']))) ?>
+        · Entrega: <?= e(dt_format($assignment['due_date'])) ?>
     <?php endif; ?>
 </p>
 

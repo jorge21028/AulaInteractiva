@@ -28,6 +28,7 @@ $counts = [
     'pending' => $sum['pending_assignments'],
     'done'    => $sum['done_assignments'],
     'all'     => $sum['assignments'],
+    'scheduled' => $sum['scheduled_assignments'],
 ];
 $defaultTab = $counts['needs'] > 0 ? 'needs' : ($counts['pending'] > 0 ? 'pending' : 'all');
 
@@ -45,6 +46,7 @@ $tabs = [
     'needs'   => ['🔴 Por corregir', 'alert'],
     'pending' => ['⏳ Pendientes de entrega', ''],
     'done'    => ['✅ Realizadas y corregidas', ''],
+    'scheduled' => ['🕒 Programadas', ''],
     'all'     => ['Todas', ''],
 ];
 
@@ -67,6 +69,7 @@ require __DIR__ . '/../includes/header.php';
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <a class="btn btn-secondary" href="subject_report.php?id=<?= (int) $subjectId ?>">📊 Reporte de estudiantes</a>
         <a class="btn btn-secondary" href="materials.php?subject=<?= (int) $subjectId ?>">📁 Archivos para estudiantes</a>
+        <a class="btn btn-secondary" href="import_content.php?subject=<?= (int) $subjectId ?>">📥 Importar contenido</a>
         <a class="btn" href="assignments.php?subject=<?= (int) $subjectId ?>">➕ Nueva asignación</a>
     </div>
 </div>
@@ -101,7 +104,7 @@ require __DIR__ . '/../includes/header.php';
             $total = max(1, $a['total']);
         ?>
             <a class="asg-card <?= $cardClass ?>" href="assignment_detail.php?id=<?= (int) $a['id'] ?>"
-               data-needs="<?= $a['is_needs'] ? 1 : 0 ?>" data-pending="<?= $a['is_pending'] ? 1 : 0 ?>" data-done="<?= $a['is_done'] ? 1 : 0 ?>">
+               data-scheduled="<?= $a['is_scheduled'] ? 1 : 0 ?>" data-needs="<?= $a['is_needs'] ? 1 : 0 ?>" data-pending="<?= $a['is_pending'] ? 1 : 0 ?>" data-done="<?= $a['is_done'] ? 1 : 0 ?>">
                 <h3><?= e($icon) ?> <?= e($a['title']) ?></h3>
                 <p class="asg-kind"><?= e($kind) ?>
                     <?php if (($a['audience'] ?? 'all') === 'selected'): ?>
@@ -126,8 +129,11 @@ require __DIR__ . '/../includes/header.php';
 
                 <p class="asg-kind" style="margin:0;">
                     <?= (int) $a['completed'] ?> / <?= (int) $a['total'] ?> entregadas · <?= (int) $a['points'] ?> pts
+                    <?php if ($a['is_scheduled']): ?>
+                        <span class="chip chip-blue" style="margin-right:4px;" title="Los estudiantes no la ven hasta esa fecha">🕒 Inicia <?= e(dt_format($a['start_date'])) ?></span>
+                    <?php endif; ?>
                     <?php if ($a['due_date']): ?>
-                        · Entrega: <?= e(date('d/m/Y', strtotime($a['due_date']))) ?>
+                        · Entrega: <?= e(dt_format($a['due_date'])) ?>
                         <?php if ($a['is_overdue']): ?><span class="chip chip-red" style="margin-left:4px;">vencida</span><?php endif; ?>
                     <?php endif; ?>
                 </p>
@@ -147,12 +153,14 @@ require __DIR__ . '/../includes/header.php';
             needs:   'Trabajos de creación entregados que todavía no has revisado.',
             pending: 'Asignaciones en las que algún estudiante aún no entrega.',
             done:    'Todos entregaron y no queda nada por corregir.',
+            scheduled: 'Todavía no inician: los estudiantes no las ven hasta su fecha y hora de inicio.',
             all:     '',
         };
         const emptyMsgs = {
             needs:   '🎉 No tienes nada por corregir en esta asignatura.',
             pending: '👏 Todos los estudiantes entregaron todas las asignaciones.',
             done:    'Todavía no hay asignaciones completamente realizadas y corregidas.',
+            scheduled: 'No tienes asignaciones programadas para más adelante.',
             all:     '',
         };
         function show(key) {
@@ -161,7 +169,8 @@ require __DIR__ . '/../includes/header.php';
                 const ok = key === 'all'
                     || (key === 'needs' && c.dataset.needs === '1')
                     || (key === 'pending' && c.dataset.pending === '1')
-                    || (key === 'done' && c.dataset.done === '1');
+                    || (key === 'done' && c.dataset.done === '1')
+                || (key === 'scheduled' && c.dataset.scheduled === '1');
                 c.style.display = ok ? '' : 'none';
                 if (ok) visible++;
             });
