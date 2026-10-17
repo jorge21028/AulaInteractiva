@@ -2,7 +2,8 @@
 define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
-require_once __DIR__ . '/../includes/game_helpers.php'; // también carga los helpers de juegos de palabras
+require_once __DIR__ . '/../includes/game_helpers.php';
+require_once __DIR__ . '/../includes/image_helpers.php'; // también carga los helpers de juegos de palabras
 
 require_role('teacher');
 
@@ -292,7 +293,7 @@ require __DIR__ . '/../includes/header.php';
             <label style="margin-top:0;">Imagen de la pregunta (opcional)</label>
             <div id="question-image-preview" style="margin-bottom:10px;">
                 <?php if ($question['image_path']): ?>
-                    <img src="<?= e(rtrim(APP_URL, '/')) ?>/<?= e($question['image_path']) ?>" style="max-width:100%; max-height:200px; border-radius:8px; display:block;">
+                    <img src="<?= e(uploads_public_url($question['image_path'])) ?>" style="max-width:100%; max-height:200px; border-radius:8px; display:block;">
                 <?php else: ?>
                     <p class="text-muted" style="font-size:0.85rem;">Sin imagen.</p>
                 <?php endif; ?>
@@ -304,8 +305,10 @@ require __DIR__ . '/../includes/header.php';
         </div>
     </section>
 
+    <script src="<?= e(uploads_public_url('assets/js/image_upload.js')) ?>"></script>
     <script>
-    const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;
+    // Solo la carpeta de la app (sin dominio): la subida va siempre al mismo sitio desde el que se abrió la página.
+    const AULA_APP_URL = <?= json_encode(rtrim((string) (parse_url(APP_URL, PHP_URL_PATH) ?? ''), '/')) ?>;
     const QUESTION_ID = <?= (int) $questionId ?>;
     const CSRF_TOKEN = <?= json_encode(csrf_token()) ?>;
 
@@ -319,16 +322,23 @@ require __DIR__ . '/../includes/header.php';
         const statusEl = document.getElementById('question-image-status');
         statusEl.textContent = 'Subiendo...';
 
+        // Se reduce la foto en el navegador antes de subirla (el servidor la reduce de nuevo si hace falta)
+        const prepared = await AulaImages.prepare(file);
         const formData = new FormData();
-        formData.append('image', file);
+        formData.append('image', prepared, prepared.name || 'imagen.jpg');
         formData.append('question_id', QUESTION_ID);
         formData.append('action', 'upload');
         formData.append('csrf_token', CSRF_TOKEN);
 
         try {
-            const res = await fetch(`${AULA_APP_URL}/api/activities/upload_question_image.php`, { method: 'POST', body: formData });
-            const data = await res.json();
-            if (data.success) {
+            const res = await fetch(`${AULA_APP_URL}/api/activities/upload_question_image.php`, { method: 'POST', body: formData, credentials: 'same-origin' });
+            let data = null;
+            try { data = await res.json(); } catch (parseErr) { /* respuesta no JSON */ }
+            if (!data) {
+                statusEl.textContent = res.status === 413
+                    ? 'La imagen es demasiado pesada. Prueba con una más pequeña.'
+                    : 'No se pudo subir la imagen (error ' + res.status + ').';
+            } else if (data.success) {
                 document.getElementById('question-image-preview').innerHTML =
                     `<img src="${data.image_url}" style="max-width:100%; max-height:200px; border-radius:8px; display:block;">`;
                 document.getElementById('btn-remove-question-image').style.display = 'inline-block';

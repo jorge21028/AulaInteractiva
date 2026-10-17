@@ -10,6 +10,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/game_helpers.php';
+require_once __DIR__ . '/../../includes/image_helpers.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -98,7 +99,7 @@ if ($game['status'] === 'question' && isset($questions[$idx])) {
         'time_seconds'   => (int) $q['time_seconds'],
         'time_remaining' => $remaining,
         'points'         => (int) $q['points'],
-        'image_url'      => $q['image_path'] ? rtrim(APP_URL, '/') . '/' . $q['image_path'] : null,
+        'image_url'      => $q['image_path'] ? uploads_public_url($q['image_path']) : null,
         'answered_count' => game_answered_count($pdo, (int) $game['id'], (int) $q['id']),
         'already_answered' => $alreadyAnswered,
         'my_option_id'   => $myAnswer,
@@ -132,7 +133,7 @@ if ($game['status'] === 'question_results' && isset($questions[$idx])) {
     $response['results'] = [
         'question_id' => (int) $q['id'],
         'statement'   => $q['statement'],
-        'image_url'   => $q['image_path'] ? rtrim(APP_URL, '/') . '/' . $q['image_path'] : null,
+        'image_url'   => $q['image_path'] ? uploads_public_url($q['image_path']) : null,
         'explanation' => $q['explanation'],
         'type'        => $q['type'],
     ];

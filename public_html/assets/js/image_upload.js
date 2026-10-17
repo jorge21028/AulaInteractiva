@@ -8,8 +8,8 @@
 (function (global) {
     'use strict';
 
-    const MAX_SIDE = 1600;          // lado mayor máximo en píxeles
-    const SKIP_BELOW = 600 * 1024;  // si ya pesa menos de esto y no es enorme, se sube tal cual
+    const MAX_SIDE = 1280;          // lado mayor máximo en píxeles
+    const SKIP_BELOW = 300 * 1024;  // si ya pesa menos de esto y no es enorme, se sube tal cual
 
     function loadBitmap(file) {
         return new Promise((resolve, reject) => {
@@ -35,12 +35,26 @@
             const canvas = document.createElement('canvas');
             canvas.width = w; canvas.height = h;
             const ctx = canvas.getContext('2d');
-            const keepPng = file.type === 'image/png';
-            if (!keepPng) { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h); }
             ctx.drawImage(img, 0, 0, w, h);
 
+            // PNG con transparencia real se conserva como PNG; el resto (fotos, capturas) se guarda como JPEG, que pesa mucho menos
+            let keepPng = false;
+            if (file.type === 'image/png' || file.type === 'image/webp') {
+                try {
+                    const data = ctx.getImageData(0, 0, w, h).data;
+                    const step = Math.max(1, Math.floor(data.length / 4 / 20000)) * 4;
+                    for (let i = 3; i < data.length; i += step) { if (data[i] < 250) { keepPng = true; break; } }
+                } catch (e) { keepPng = file.type === 'image/png'; }
+            }
+            if (!keepPng) {
+                // fondo blanco bajo la imagen (por si el original tenía píxeles semitransparentes)
+                const flat = document.createElement('canvas'); flat.width = w; flat.height = h;
+                const fctx = flat.getContext('2d'); fctx.fillStyle = '#ffffff'; fctx.fillRect(0, 0, w, h); fctx.drawImage(canvas, 0, 0);
+                canvas.width = w; ctx.drawImage(flat, 0, 0);
+            }
+
             const type = keepPng ? 'image/png' : 'image/jpeg';
-            const blob = await new Promise(res => canvas.toBlob(res, type, 0.85));
+            const blob = await new Promise(res => canvas.toBlob(res, type, 0.8));
             if (!blob || blob.size >= file.size) return file; // no mejoró: se deja el original
             const base = (file.name || 'imagen').replace(/\.[^.]+$/, '');
             return new File([blob], base + (keepPng ? '.png' : '.jpg'), { type });

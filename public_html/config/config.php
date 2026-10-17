@@ -74,7 +74,8 @@ if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
 }
 
 // ---- Límites de subida de archivos (ajustados para hosting gratuito) ----
-define('UPLOAD_MAX_IMAGE_BYTES', 3 * 1024 * 1024);   // 3 MB
+define('UPLOAD_MAX_IMAGE_BYTES', 3 * 1024 * 1024);   // 3 MB (tamaño máximo de la imagen YA reducida)
+define('UPLOAD_MAX_IMAGE_RAW_BYTES', 10 * 1024 * 1024); // 10 MB (foto original que se acepta antes de reducirla)
 define('UPLOAD_MAX_AUDIO_BYTES', 8 * 1024 * 1024);   // 8 MB
 define('UPLOAD_MAX_VIDEO_BYTES', 20 * 1024 * 1024);  // 20 MB
 

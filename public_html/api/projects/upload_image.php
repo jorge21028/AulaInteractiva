@@ -12,10 +12,15 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/availability_helpers.php';
+require_once __DIR__ . '/../../includes/image_helpers.php';
 
 header('Content-Type: application/json; charset=utf-8');
 require_role('student');
 
+// Si la foto es más grande que el límite del servidor, PHP descarta todo el formulario (y el token también).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && empty($_FILES) && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+    json_response(['success' => false, 'message' => 'La imagen es demasiado pesada para este servidor. Prueba con una más pequeña.'], 413);
+}
 csrf_verify($_POST['csrf_token'] ?? null);
 
 $projectId = (int) ($_POST['project_id'] ?? 0);
@@ -53,8 +58,9 @@ if ($projectId > 0) {
     }
 }
 
-if ($file['size'] > UPLOAD_MAX_IMAGE_BYTES) {
-    $maxMb = round(UPLOAD_MAX_IMAGE_BYTES / 1024 / 1024, 1);
+// Se acepta la foto original grande (de celular) y se REDUCE antes de guardarla.
+if ($file['size'] > UPLOAD_MAX_IMAGE_RAW_BYTES) {
+    $maxMb = round(UPLOAD_MAX_IMAGE_RAW_BYTES / 1024 / 1024, 1);
     json_response(['success' => false, 'message' => "La imagen supera el tamaño máximo permitido ({$maxMb} MB)."], 400);
 }
 
@@ -83,6 +89,19 @@ if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
     json_response(['success' => false, 'message' => 'No fue posible guardar la imagen.'], 500);
 }
 
+// Reducir tamaño/dimensiones (y quitar metadatos) para no llenar el espacio del hosting
+$opt = image_optimize($targetPath, $imageInfo['mime']);
+if ($opt['path'] !== $targetPath) {
+    $targetPath = $opt['path'];
+    $storedName = basename($targetPath);
+}
+if ($opt['size'] > UPLOAD_MAX_IMAGE_BYTES) {
+    @unlink($targetPath);
+    json_response(['success' => false, 'message' => 'La imagen sigue siendo muy pesada incluso reducida. Prueba con otra.'], 400);
+}
+$imageInfo['mime'] = $opt['mime'];
+$file['size'] = $opt['size'];
+
 $stmt = $pdo->prepare(
     "INSERT INTO uploads (user_id, project_id, original_name, stored_name, mime_type, size_bytes, kind, created_at)
      VALUES (:user_id, :project_id, :original_name, :stored_name, :mime_type, :size_bytes, 'image', :created_at)"
@@ -99,7 +118,6 @@ $stmt->execute([
 
 // Se devuelve una RUTA LOCAL (sin dominio): así la imagen carga aunque el sitio se abra con una dirección distinta
 // a APP_URL (http/https o con/sin www), que era la causa de que las imágenes no aparecieran en el editor.
-$basePath = rtrim((string) (parse_url(APP_URL, PHP_URL_PATH) ?? ''), '/');
-$url = $basePath . '/uploads/images/' . $storedName;
+$url = uploads_public_url('uploads/images/' . $storedName);
 
 json_response(['success' => true, 'url' => $url, 'name' => $file['name']]);

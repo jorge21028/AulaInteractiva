@@ -9,10 +9,15 @@
 define('AULA_APP', true);
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/image_helpers.php';
 
 header('Content-Type: application/json; charset=utf-8');
 require_role('teacher');
 
+// Si la foto es más grande que el límite del servidor, PHP descarta todo el formulario (y el token también).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && empty($_FILES) && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+    json_response(['success' => false, 'message' => 'La imagen es demasiado pesada para este servidor. Prueba con una más pequeña.'], 413);
+}
 csrf_verify($_POST['csrf_token'] ?? null);
 
 $questionId = (int) ($_POST['question_id'] ?? 0);
@@ -49,7 +54,13 @@ if ($action === 'remove') {
     json_response(['success' => true, 'image_url' => null]);
 }
 
-if (empty($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
+if (empty($_FILES['image'])) {
+    json_response(['success' => false, 'message' => 'La imagen es demasiado pesada para subirla. Prueba con una más pequeña.'], 400);
+}
+if ($_FILES['image']['error'] === UPLOAD_ERR_INI_SIZE || $_FILES['image']['error'] === UPLOAD_ERR_FORM_SIZE) {
+    json_response(['success' => false, 'message' => 'La imagen es demasiado pesada para este servidor. Prueba con una más pequeña.'], 400);
+}
+if ($_FILES['image']['error'] !== UPLOAD_ERR_OK) {
     json_response(['success' => false, 'message' => 'No se recibió ninguna imagen válida.'], 400);
 }
 
@@ -59,8 +70,8 @@ if (!is_allowed_extension($file['name'], UPLOAD_ALLOWED_IMAGE)) {
     json_response(['success' => false, 'message' => 'Formato de imagen no permitido.'], 400);
 }
 
-if ($file['size'] > UPLOAD_MAX_IMAGE_BYTES) {
-    $maxMb = round(UPLOAD_MAX_IMAGE_BYTES / 1024 / 1024, 1);
+if ($file['size'] > UPLOAD_MAX_IMAGE_RAW_BYTES) {
+    $maxMb = round(UPLOAD_MAX_IMAGE_RAW_BYTES / 1024 / 1024, 1);
     json_response(['success' => false, 'message' => "La imagen supera el tamaño máximo permitido ({$maxMb} MB)."], 400);
 }
 
@@ -69,7 +80,11 @@ if ($imageInfo === false) {
     json_response(['success' => false, 'message' => 'El archivo no es una imagen válida.'], 400);
 }
 
-$storedName = safe_random_filename($file['name']);
+$extByMime = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+if (!isset($extByMime[$imageInfo['mime']])) {
+    json_response(['success' => false, 'message' => 'Formato de imagen no permitido. Usa JPG, PNG, GIF o WebP.'], 400);
+}
+$storedName = safe_random_filename('imagen.' . $extByMime[$imageInfo['mime']]);
 $targetDir = UPLOAD_DIR . '/images';
 if (!is_dir($targetDir)) {
     mkdir($targetDir, 0755, true);
@@ -80,6 +95,19 @@ if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
     error_log('upload_question_image.php: move_uploaded_file failed for ' . $storedName);
     json_response(['success' => false, 'message' => 'No fue posible guardar la imagen.'], 500);
 }
+
+// Reducir tamaño/dimensiones para no llenar el espacio del hosting
+$opt = image_optimize($targetPath, $imageInfo['mime']);
+if ($opt['path'] !== $targetPath) {
+    $targetPath = $opt['path'];
+    $storedName = basename($targetPath);
+}
+if ($opt['size'] > UPLOAD_MAX_IMAGE_BYTES) {
+    @unlink($targetPath);
+    json_response(['success' => false, 'message' => 'La imagen sigue siendo muy pesada incluso reducida. Prueba con otra.'], 400);
+}
+$imageInfo['mime'] = $opt['mime'];
+$file['size'] = $opt['size'];
 
 $relativePath = 'uploads/images/' . $storedName;
 
@@ -101,4 +129,4 @@ $pdo->prepare(
     'created_at' => now_datetime(),
 ]);
 
-json_response(['success' => true, 'image_url' => rtrim(APP_URL, '/') . '/' . $relativePath]);
+json_response(['success' => true, 'image_url' => uploads_public_url($relativePath)]);

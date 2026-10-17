@@ -188,3 +188,11 @@ Posibles ampliaciones futuras: fichas de estudio, preguntas con audio/video como
 - **Cursos inactivos**: columna `courses.is_active` (`database/schema_fase12.sql`). Los estudiantes no ven el curso, sus materiales ni pueden matricularse con su código. El profesor los ve en `teacher/inactive_courses.php` y los reactiva desde allí o desde *Ajustes* del curso.
 - **Importar contenido**: `teacher/import_content.php` + `includes/import_helpers.php`. Copia actividades interactivas y cuestionarios (con preguntas, opciones e imágenes) de cualquier curso del profesor, activo o inactivo, a una asignatura de un curso activo: todo el curso o solo lo marcado.
 - **Zona horaria opcional**: define `APP_TIMEZONE` en `config/env.php` (ej. `'America/Santo_Domingo'`) si la hora del servidor no coincide con la tuya.
+
+## Fase 13 — Imágenes: reducción de tamaño y visualización
+
+- `includes/image_helpers.php`: `image_optimize()` (GD) reduce el lado mayor a 1280 px, corrige la orientación de fotos de celular, quita metadatos/GPS y recomprime; los PNG sin transparencia pasan a JPEG (o se queda el PNG si pesa menos). `uploads_public_url()` devuelve rutas locales sin dominio.
+- Se acepta la foto original de hasta 10 MB (`UPLOAD_MAX_IMAGE_RAW_BYTES`) y se guarda ya reducida (máx. 3 MB). Aplica a las imágenes de los estudiantes y a las de las preguntas del profesor.
+- El navegador también reduce la foto antes de subirla (`assets/js/image_upload.js`).
+- Las imágenes de preguntas (partida en vivo, proyector, editor) usan rutas locales en vez de `APP_URL`, así se ven aunque el sitio se abra con otro dominio.
+- `teacher/optimize_images.php`: reduce por lotes las imágenes que ya estaban subidas (mismo nombre y formato).
