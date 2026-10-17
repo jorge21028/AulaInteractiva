@@ -4,6 +4,7 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/quiz_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
+require_once __DIR__ . '/../includes/description_helpers.php';
 
 require_role('student');
 
@@ -13,7 +14,7 @@ $assignmentId = (int) ($_GET['assignment_id'] ?? 0);
 
 $stmt = $pdo->prepare(
     "SELECT a.id AS assignment_id, a.due_date, a.points AS assignment_points, a.quiz_id AS assignment_quiz_id,
-        qz.id AS quiz_id, qz.title, qz.description, qz.instructions,
+        qz.id AS quiz_id, qz.title, qz.description, qz.description_format, qz.instructions,
         qz.time_limit_minutes, qz.max_attempts, qz.questions_per_attempt, qz.status
      FROM assignments a
      INNER JOIN quizzes qz ON qz.id = a.quiz_id
@@ -34,6 +35,7 @@ $quiz = [
     'id' => (int) $row['quiz_id'],
     'title' => $row['title'],
     'description' => $row['description'],
+    'description_format' => $row['description_format'],
     'instructions' => $row['instructions'],
     'time_limit_minutes' => $row['time_limit_minutes'],
     'max_attempts' => (int) $row['max_attempts'],
@@ -218,7 +220,7 @@ require __DIR__ . '/../includes/header.php';
 
 <?php elseif ($activeAttempt): ?>
     <?php if ($quiz['description']): ?>
-        <div class="card"><?= nl2br(e($quiz['description'])) ?></div>
+        <div class="card"><?= render_description($quiz['description'], $quiz['description_format'] ?? 'text') ?></div>
     <?php endif; ?>
     <?php if ($quiz['instructions']): ?>
         <div class="card" style="background:#F8FAFC;"><strong>Instrucciones:</strong> <?= nl2br(e($quiz['instructions'])) ?></div>

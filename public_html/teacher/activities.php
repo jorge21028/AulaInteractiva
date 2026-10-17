@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
     $title = clean_string($_POST['title'] ?? '');
     $subjectId = (int) ($_POST['subject_id'] ?? 0);
     $gameMode = clean_string($_POST['game_mode'] ?? 'trivia');
-    if (!in_array($gameMode, ['trivia', 'sapito', 'ahorcado', 'crucigrama'], true)) {
+    if (!in_array($gameMode, ['trivia', 'sapito', 'ahorcado', 'crucigrama', 'sopa_letras', 'emparejar'], true)) {
         $gameMode = 'trivia';
     }
 
@@ -54,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
             'teacher_id'        => $teacherId,
             'title'             => $title,
             'difficulty'        => 'media',
-            'time_per_question' => match ($gameMode) { 'ahorcado' => 60, 'crucigrama' => 30, default => 20 },
+            'time_per_question' => match ($gameMode) { 'ahorcado' => 60, 'crucigrama', 'sopa_letras', 'emparejar' => 30, default => 20 },
             'game_mode'         => $gameMode,
             'source'            => 'manual',
             'status'            => 'draft',
@@ -120,6 +120,8 @@ require __DIR__ . '/../includes/header.php';
                 <option value="sapito">🐸 El Sapito (arrastra la respuesta al nenúfar correcto)</option>
                 <option value="ahorcado">🪢 Ahorcado (adivina la palabra letra por letra a partir de una pista)</option>
                 <option value="crucigrama">🧩 Crucigrama (se arma solo con tus pistas y respuestas)</option>
+                <option value="sopa_letras">🔤 Sopa de letras (el estudiante busca las palabras escondidas en una cuadrícula)</option>
+                <option value="emparejar">🔗 Emparejar conceptos (une cada concepto con su definición)</option>
             </select>
 
             <button type="submit" class="btn">Crear y continuar</button>

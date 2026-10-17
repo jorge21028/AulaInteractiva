@@ -7,7 +7,7 @@
  * entregó nada (nota manual). Por eso se mira la EVIDENCIA real de entrega según el tipo de asignación:
  *   - Trabajo de creación        -> el trabajo está entregado (project_id)
  *   - Cuestionario               -> existe un intento presentado
- *   - Ahorcado / Crucigrama      -> el intento está completado
+ *   - Juegos de palabras         -> el intento está completado (ahorcado, crucigrama, sopa de letras, emparejar)
  *   - Actividad en vivo (trivia) -> jugó una partida que se sincronizó (game_id)
  *
  * Estado de cada estudiante en cada asignación:
@@ -23,6 +23,8 @@ if (!defined('AULA_APP')) {
     http_response_code(403);
     exit('Acceso directo no permitido.');
 }
+
+require_once __DIR__ . '/word_games_helpers.php';   // WORD_GAME_MODES
 
 const REPORT_STATE_LABELS = [
     'graded'   => 'Enviada y calificada',
@@ -44,7 +46,7 @@ function report_is_delivered(array $assignment, array $row): bool
         return (int) $row['quiz_done'] > 0 || !empty($row['quiz_attempt_id']);
     }
     if (!empty($assignment['activity_id'])) {
-        if (in_array($assignment['game_mode'] ?? null, ['ahorcado', 'crucigrama'], true)) {
+        if (in_array($assignment['game_mode'] ?? null, WORD_GAME_MODES, true)) {
             return ($row['wg_status'] ?? null) === 'completed';
         }
         return !empty($row['game_id']);

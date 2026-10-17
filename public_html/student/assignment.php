@@ -5,6 +5,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/word_play_helpers.php'; // límite de palabras por estudiante
 require_once __DIR__ . '/../includes/project_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
+require_once __DIR__ . '/../includes/description_helpers.php';
 
 require_role('student');
 
@@ -42,7 +43,7 @@ if ((int) $assignment['course_active'] !== 1 || !assignment_has_started($assignm
 $isOverdue = assignment_overdue_for_student($assignment, $assignment) || ($assignment['status'] === 'completed' && assignment_is_past_due($assignment));
 $isQuiz = $assignment['quiz_id'] !== null;
 $isCreation = $assignment['activity_id'] === null && !$isQuiz;
-$isWordGame = in_array($assignment['game_mode'] ?? null, ['ahorcado', 'crucigrama'], true); // se juega solo, sin partida en vivo
+$isWordGame = in_array($assignment['game_mode'] ?? null, WORD_GAME_MODES, true); // se juega solo, sin partida en vivo
 
 $wordAttempt = null;
 if ($isWordGame) {
@@ -114,7 +115,7 @@ require __DIR__ . '/../includes/header.php';
 </p>
 
 <?php if ($assignment['description']): ?>
-    <div class="card"><?= nl2br(e($assignment['description'])) ?></div>
+    <div class="card"><?= render_description($assignment['description'], $assignment['description_format'] ?? 'text') ?></div>
 <?php endif; ?>
 
 <?php if ($assignment['status'] === 'completed'): ?>
@@ -200,7 +201,7 @@ require __DIR__ . '/../includes/header.php';
             <p style="color:var(--color-danger);">La fecha de entrega ya venció.</p>
         <?php else: ?>
             <a class="btn" href="word_game.php?assignment_id=<?= (int) $assignmentId ?>">
-                <?= $wordAttempt ? 'Continuar' : ($assignment['game_mode'] === 'crucigrama' ? 'Comenzar crucigrama' : 'Comenzar ahorcado') ?>
+                <?= $wordAttempt ? 'Continuar' : 'Comenzar ' . e(mb_strtolower(game_mode_label($assignment['game_mode']), 'UTF-8')) ?>
             </a>
         <?php endif; ?>
     </div>

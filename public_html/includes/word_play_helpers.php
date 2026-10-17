@@ -1,13 +1,15 @@
 <?php
 /**
  * word_play_helpers.php
- * Ahorcado y Crucigrama como actividades INDIVIDUALES: sin cronómetro y sin partida en vivo.
+ * Ahorcado, Crucigrama, Sopa de letras y Emparejar conceptos como actividades INDIVIDUALES: sin cronómetro y sin partida en vivo.
  * El estudiante juega a su ritmo desde su asignación; el avance se guarda en el servidor
  * (tabla word_game_attempts) y al terminar se califica la entrega automáticamente.
  *
  * Estado guardado en word_game_attempts.state_json:
  *   ahorcado:   {"ids": [ids sorteados, en orden], "w": {"<id_palabra>": {"g": ["A","B"], "done": 1, "solved": 1}}}
  *   crucigrama: {"ids": [ids sorteados], "cells": {"fila,columna": "LETRA"}}
+ *   sopa_letras: {"ids": [...], "seed": N, "found": {"<id_palabra>": [r1,c1,r2,c2]}}
+ *   emparejar:  {"ids": [...], "seed": N, "m": {"<id_pareja>": {"w": intentos_fallidos, "ok": 1}}}
  *   "last": ids del intento anterior (para que el siguiente intento prefiera palabras distintas)
  *
  * BANCO ALEATORIO: si la actividad define words_per_attempt, cada estudiante recibe ESE número de palabras
@@ -34,7 +36,7 @@ function wga_load_assignment(PDO $pdo, int $assignmentId, int $studentId): ?arra
          INNER JOIN submissions sub ON sub.assignment_id = a.id AND sub.student_id = :student_id
          INNER JOIN subjects sj ON sj.id = a.subject_id
          INNER JOIN courses cc ON cc.id = sj.course_id AND cc.is_active = 1
-         WHERE a.id = :id AND act.game_mode IN ('ahorcado', 'crucigrama')
+         WHERE a.id = :id AND act.game_mode IN ('ahorcado', 'crucigrama', 'sopa_letras', 'emparejar')
            AND (a.start_date IS NULL OR a.start_date <= :now)
          LIMIT 1"
     );
@@ -151,6 +153,9 @@ function wordbank_parse_limit(string $raw, string $mode): array
     if ($mode === 'crucigrama' && $n < 2) {
         return [null, 'En el crucigrama cada estudiante necesita al menos 2 palabras (para que se crucen).'];
     }
+    if ($mode === 'emparejar' && $n < 2) {
+        return [null, 'En emparejar conceptos cada estudiante necesita al menos 2 parejas.'];
+    }
     return [$n, null];
 }
 
@@ -221,7 +226,7 @@ function wga_ensure_selection(PDO $pdo, array $assignment, array $attempt, array
     }
 
     $isFresh = function (array $st): bool {
-        return empty($st['ids']) && empty($st['w']) && empty($st['cells']);
+        return empty($st['ids']) && empty($st['w']) && empty($st['cells']) && empty($st['found']) && empty($st['m']);
     };
 
     if (!$isFresh(word_game_decode_answer($attempt['state_json']))) {
@@ -234,6 +239,38 @@ function wga_ensure_selection(PDO $pdo, array $assignment, array $attempt, array
         $state = word_game_decode_answer($row['state_json']);
         if ($row['status'] === 'in_progress' && $isFresh($state)) {
             $state['ids'] = wga_pick_ids($assignment['game_mode'], $bank, $n, is_array($state['last'] ?? null) ? $state['last'] : []);
+            wga_save_state($pdo, (int) $row['id'], $state);
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM word_game_attempts WHERE id = :id');
+    $stmt->execute(['id' => $attempt['id']]);
+    return $stmt->fetch();
+}
+
+/**
+ * Sopa de letras / emparejar: cada intento tiene una semilla propia (guardada en el servidor) que fija el orden y la
+ * cuadrícula, así la página se ve igual al recargar. Devuelve la fila del intento con la semilla ya guardada.
+ */
+function wga_ensure_seed(PDO $pdo, array $attempt): array
+{
+    $state = word_game_decode_answer($attempt['state_json']);
+    if (!empty($state['seed'])) {
+        return $attempt;
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $row = wga_lock_attempt($pdo, (int) $attempt['id']);
+        $state = word_game_decode_answer($row['state_json']);
+        if (empty($state['seed'])) {
+            $state['seed'] = random_int(1000, 2000000000);
             wga_save_state($pdo, (int) $row['id'], $state);
         }
         $pdo->commit();

@@ -111,16 +111,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = $wordError;
         } else {
             $duplicate = false;
-            if ($question['game_mode'] === 'crucigrama') {
+            if (word_mode_dedupes($question['game_mode'])) {
                 foreach (word_activity_words($pdo, (int) $question['activity_id']) as $w) {
-                    if ((int) $w['id'] !== $questionId && word_letters($w['word']) === word_letters($word)) {
+                    if ((int) $w['id'] !== $questionId && word_dedupe_key($w['word'], $question['game_mode']) === word_dedupe_key($word, $question['game_mode'])) {
                         $duplicate = true;
                         break;
                     }
                 }
             }
             if ($duplicate) {
-                $errors[] = 'Esa palabra ya existe en el crucigrama.';
+                $errors[] = 'Esa palabra ya existe en ' . word_mode_with_article($question['game_mode']) . '.';
             } else {
                 $exists = $pdo->prepare('SELECT id FROM question_options WHERE question_id = :qid ORDER BY order_index ASC, id ASC LIMIT 1');
                 $exists->execute(['qid' => $questionId]);
@@ -270,7 +270,7 @@ require __DIR__ . '/../includes/header.php';
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="update_question">
 
-            <label for="statement"><?= $question['type'] === 'palabra' ? 'Pista' : 'Pregunta' ?></label>
+            <label for="statement"><?= $question['type'] === 'palabra' ? ($question['game_mode'] === 'emparejar' ? 'Definición / pareja del concepto' : 'Pista') : 'Pregunta' ?></label>
             <textarea id="statement" name="statement" rows="3" required><?= e($question['statement']) ?></textarea>
 
             <?php if ($question['type'] !== 'palabra'): ?>
@@ -504,17 +504,20 @@ require __DIR__ . '/../includes/header.php';
             </form>
 
         <?php elseif ($question['type'] === 'palabra'): ?>
-            <h2 style="margin-top:0;">Palabra respuesta</h2>
+            <h2 style="margin-top:0;"><?= $question['game_mode'] === 'emparejar' ? 'Concepto' : 'Palabra respuesta' ?></h2>
             <p class="text-muted" style="font-size:0.85rem;">
-                <?= $question['game_mode'] === 'crucigrama'
-                    ? 'De 2 a 15 letras, sin números ni símbolos. Las tildes se conservan en pantalla pero los estudiantes escriben sin tilde.'
-                    : 'Puede ser una palabra o una frase corta. Los estudiantes adivinan letra por letra (las tildes no cuentan).' ?>
+                <?= match ($question['game_mode']) {
+                    'crucigrama'  => 'De 2 a 15 letras, sin números ni símbolos. Las tildes se conservan en pantalla pero los estudiantes escriben sin tilde.',
+                    'sopa_letras' => 'De 2 a 15 letras, sin números ni símbolos (se ignoran los espacios). Se esconde en la cuadrícula; los estudiantes la marcan en pantalla.',
+                    'emparejar'   => 'El concepto que el estudiante debe unir con su pareja (la definición de arriba). Puede ser texto corto, número, fecha, fórmula… (hasta 80 caracteres).',
+                    default       => 'Puede ser una palabra o una frase corta. Los estudiantes adivinan letra por letra (las tildes no cuentan).',
+                } ?>
             </p>
             <form method="post" action="activity_question.php?id=<?= (int) $questionId ?>">
                 <?php csrf_field(); ?>
                 <input type="hidden" name="action" value="update_word">
-                <label for="word">Palabra</label>
-                <input type="text" id="word" name="word" required maxlength="40" autocomplete="off" value="<?= e($options[0]['text'] ?? '') ?>">
+                <label for="word"><?= $question['game_mode'] === 'emparejar' ? 'Concepto' : 'Palabra' ?></label>
+                <input type="text" id="word" name="word" required maxlength="<?= $question['game_mode'] === 'emparejar' ? 80 : 40 ?>" autocomplete="off" value="<?= e($options[0]['text'] ?? '') ?>">
                 <button type="submit" class="btn">Guardar palabra</button>
             </form>
         <?php elseif ($question['type'] === 'completar'): ?>

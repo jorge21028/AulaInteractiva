@@ -5,6 +5,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/game_helpers.php'; // iconos de modos de juego
 require_once __DIR__ . '/../includes/assignment_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
+require_once __DIR__ . '/../includes/description_field.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
 require_once __DIR__ . '/../includes/space_helpers.php';
 require_once __DIR__ . '/../includes/submission_admin_helpers.php'; // estudiantes del curso
@@ -55,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
 
     $mode = clean_string($_POST['mode'] ?? 'interactive'); // 'interactive' | 'quiz' | 'creation'
     $title = clean_string($_POST['title'] ?? '');
-    $description = clean_string($_POST['description'] ?? '');
+    [$description, $descriptionFormat] = desc_prepare_for_save((string) ($_POST['description'] ?? ''), $_POST['description_format'] ?? 'text');
     $startRaw = clean_string($_POST['start_date'] ?? '');
     $dueRaw = clean_string($_POST['due_date'] ?? '');
     $startDate = dt_from_input($startRaw);
@@ -150,7 +151,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
                 $points,
                 $projectType,
                 $quizId,
-                $studentIds
+                $studentIds,
+                $descriptionFormat
             );
             audit_log(
                 $pdo, $teacherId, 'create_assignment',
@@ -304,8 +306,7 @@ require __DIR__ . '/../includes/header.php';
             <label for="title">Título de la asignación</label>
             <input type="text" id="title" name="title" required placeholder="Ej: Resumen sobre sistemas operativos">
 
-            <label for="description">Descripción / instrucciones</label>
-            <textarea id="description" name="description" rows="2"></textarea>
+            <?php render_description_field('description', 'Descripción / instrucciones', (string) ($_POST['description'] ?? ''), (string) ($_POST['description_format'] ?? 'text'), 4); ?>
 
             <label for="start_date">Fecha y hora de inicio (opcional)</label>
             <input type="datetime-local" id="start_date" name="start_date" value="<?= e((string) ($_POST['start_date'] ?? '')) ?>">

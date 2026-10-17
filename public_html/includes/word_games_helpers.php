@@ -26,7 +26,8 @@ if (!defined('AULA_APP')) {
 }
 
 const HANGMAN_MAX_LIVES = 6;
-const WORD_GAME_MODES = ['ahorcado', 'crucigrama'];
+const WORD_GAME_MODES = ['ahorcado', 'crucigrama', 'sopa_letras', 'emparejar'];
+const WORDSEARCH_MAX_SIZE = 22;   // tamaño máximo (casillas por lado) de la sopa de letras
 
 // ---------------------------------------------------------------------------
 // Modos de juego (etiquetas / iconos)
@@ -43,6 +44,8 @@ function game_mode_icon(?string $mode): string
         'sapito'     => '🐸',
         'ahorcado'   => '🪢',
         'crucigrama' => '🧩',
+        'sopa_letras' => '🔤',
+        'emparejar'  => '🔗',
         default      => '🎯',
     };
 }
@@ -53,6 +56,8 @@ function game_mode_label(?string $mode): string
         'sapito'     => 'El Sapito',
         'ahorcado'   => 'Ahorcado',
         'crucigrama' => 'Crucigrama',
+        'sopa_letras' => 'Sopa de letras',
+        'emparejar'  => 'Emparejar conceptos',
         default      => 'Trivia',
     };
 }
@@ -110,14 +115,22 @@ function word_validate_for_mode(string $word, string $mode): ?string
     $letters = word_letters($word);
     $len = mb_strlen($letters, 'UTF-8');
 
-    if ($mode === 'crucigrama') {
-        // En el crucigrama solo se admiten letras (se ignoran espacios y guiones).
+    if ($mode === 'emparejar') {
+        // Emparejar conceptos: el "concepto" puede ser cualquier texto corto (letras, números, símbolos).
+        if (mb_strlen($word, 'UTF-8') > 80) {
+            return 'El concepto no puede pasar de 80 caracteres.';
+        }
+        return null;
+    }
+
+    if ($mode === 'crucigrama' || $mode === 'sopa_letras') {
+        // En el crucigrama y la sopa de letras solo se admiten letras (se ignoran espacios y guiones).
         $stripped = preg_replace('/[\s\-]+/u', '', $word);
         if ($stripped === '' || mb_strlen($stripped, 'UTF-8') !== $len) {
-            return 'En el crucigrama la palabra solo puede tener letras (sin números ni símbolos).';
+            return 'En ' . ($mode === 'sopa_letras' ? 'la sopa de letras' : 'el crucigrama') . ' la palabra solo puede tener letras (sin números ni símbolos).';
         }
         if ($len < 2 || $len > 15) {
-            return 'En el crucigrama la palabra debe tener entre 2 y 15 letras.';
+            return 'En ' . ($mode === 'sopa_letras' ? 'la sopa de letras' : 'el crucigrama') . ' la palabra debe tener entre 2 y 15 letras.';
         }
         return null;
     }
@@ -130,6 +143,38 @@ function word_validate_for_mode(string $word, string $mode): ?string
         return 'La palabra o frase no puede pasar de 40 caracteres.';
     }
     return null;
+}
+
+/** Modos en los que una misma palabra no puede repetirse dentro de la actividad. */
+function word_mode_dedupes(string $mode): bool
+{
+    return in_array($mode, ['crucigrama', 'sopa_letras', 'emparejar'], true);
+}
+
+/** Clave para detectar repetidas: sin tildes/mayúsculas (y en "emparejar", el texto completo en minúscula). */
+function word_dedupe_key(string $word, string $mode): string
+{
+    if ($mode === 'emparejar') {
+        // Sin tildes ni mayúsculas, y con los espacios normalizados ("París" = "paris")
+        $out = '';
+        foreach (word_chars(trim(preg_replace('/\s+/u', ' ', $word))) as $ch) {
+            $n = word_normalize_char($ch);
+            $out .= $n !== '' ? mb_strtolower($n, 'UTF-8') : mb_strtolower($ch, 'UTF-8');
+        }
+        return $out;
+    }
+    return word_letters($word);
+}
+
+/** Nombre del juego con artículo, para mensajes ("el crucigrama", "la sopa de letras"). */
+function word_mode_with_article(string $mode): string
+{
+    return match ($mode) {
+        'sopa_letras' => 'la sopa de letras',
+        'emparejar'   => 'el emparejamiento',
+        'ahorcado'    => 'el ahorcado',
+        default       => 'el crucigrama',
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -220,8 +265,8 @@ function aiken_parse_words(string $content, string $mode): array
             continue;
         }
 
-        if ($mode === 'crucigrama') {
-            $key = word_letters($word);
+        if (word_mode_dedupes($mode)) {
+            $key = word_dedupe_key($word, $mode);
             if (isset($seen[$key])) {
                 $errors[] = "Bloque {$numero}: la palabra \"{$word}\" está repetida en el archivo; se omitió.";
                 continue;
@@ -242,9 +287,9 @@ function aiken_parse_words(string $content, string $mode): array
 function aiken_import_words_into_activity(PDO $pdo, int $activityId, array $items, int $timeSeconds, int $points, string $mode): array
 {
     $existing = [];
-    if ($mode === 'crucigrama') {
+    if (word_mode_dedupes($mode)) {
         foreach (word_activity_words($pdo, $activityId) as $w) {
-            $existing[word_letters($w['word'])] = true;
+            $existing[word_dedupe_key($w['word'], $mode)] = true;
         }
     }
 
@@ -266,8 +311,8 @@ function aiken_import_words_into_activity(PDO $pdo, int $activityId, array $item
     $pdo->beginTransaction();
     try {
         foreach ($items as $item) {
-            if ($mode === 'crucigrama') {
-                $key = word_letters($item['word']);
+            if (word_mode_dedupes($mode)) {
+                $key = word_dedupe_key($item['word'], $mode);
                 if (isset($existing[$key])) {
                     $skipped[] = $item['word'];
                     continue;
@@ -675,4 +720,237 @@ function crossword_render_solution_html(array $layout): string
     }
     $html .= '</table></div>';
     return $html;
+}
+
+
+// ---------------------------------------------------------------------------
+// SOPA DE LETRAS
+// ---------------------------------------------------------------------------
+//   - Las palabras se esconden en una cuadrícula (→ ↓ ↘ ↗) y el resto se rellena con letras al azar.
+//   - La cuadrícula es DETERMINISTA para una semilla (la guarda el intento del estudiante), así es la misma
+//     en cada carga de la página sin guardar el tablero. Las posiciones de las palabras nunca se envían
+//     al estudiante: él marca una línea y el servidor comprueba si deletrea una palabra pendiente.
+
+/** Generador pseudoaleatorio con semilla (xorshift32): igual en cualquier versión/servidor de PHP. */
+function wg_rng(int $seed): Closure
+{
+    $state = ($seed & 0xFFFFFFFF) ?: 0x9E3779B9;
+    return function (int $n) use (&$state): int {
+        $state ^= ($state << 13) & 0xFFFFFFFF;
+        $state ^= ($state >> 17);
+        $state ^= ($state << 5) & 0xFFFFFFFF;
+        $state &= 0xFFFFFFFF;
+        return $n > 0 ? $state % $n : 0;
+    };
+}
+
+/** Baraja una lista con una semilla (Fisher-Yates determinista). */
+function wg_seeded_shuffle(array $items, int $seed): array
+{
+    $rng = wg_rng($seed);
+    $items = array_values($items);
+    for ($i = count($items) - 1; $i > 0; $i--) {
+        $j = $rng($i + 1);
+        [$items[$i], $items[$j]] = [$items[$j], $items[$i]];
+    }
+    return $items;
+}
+
+/**
+ * Arma la sopa de letras. $words: [['id','clue','word'], ...].
+ * Devuelve ['size' => n, 'grid' => [[letra]], 'placed' => [id => ['r','c','dr','dc','len']], 'unplaced' => [ids]].
+ */
+function wordsearch_build_layout(array $words, int $seed): array
+{
+    $entries = [];
+    $totalLetters = 0;
+    $maxLen = 2;
+    foreach ($words as $w) {
+        $chars = word_chars(word_letters($w['word']));
+        if (count($chars) < 2) {
+            continue;
+        }
+        $entries[] = ['id' => (int) $w['id'], 'chars' => $chars, 'len' => count($chars)];
+        $totalLetters += count($chars);
+        $maxLen = max($maxLen, count($chars));
+    }
+    // Las más largas primero (son las más difíciles de colocar); orden estable por id
+    usort($entries, fn($a, $b) => [$b['len'], $a['id']] <=> [$a['len'], $b['id']]);
+
+    $dirs = [[0, 1], [1, 0], [1, 1], [-1, 1]];   // → ↓ ↘ ↗
+    $size = max(10, $maxLen, (int) ceil(sqrt($totalLetters * 2.6)));
+    $size = min($size, WORDSEARCH_MAX_SIZE);
+
+    $placed = [];
+    $grid = [];
+    $unplaced = [];
+
+    for ($round = 0; $round < 8; $round++) {
+        $rng = wg_rng($seed + $round * 7919);
+        $grid = array_fill(0, $size, array_fill(0, $size, ''));
+        $placed = [];
+        $unplaced = [];
+
+        foreach ($entries as $e) {
+            $ok = false;
+            for ($try = 0; $try < 300 && !$ok; $try++) {
+                [$dr, $dc] = $dirs[$rng(count($dirs))];
+                $len = $e['len'];
+                $rMin = $dr === -1 ? $len - 1 : 0;
+                $rMax = $dr === 1 ? $size - $len : $size - 1;
+                $cMax = $size - $len;
+                if ($rMax < $rMin || $cMax < 0) {
+                    continue;
+                }
+                $r = $rMin + $rng($rMax - $rMin + 1);
+                $c = $rng($cMax + 1);
+
+                $fits = true;
+                for ($k = 0; $k < $len; $k++) {
+                    $cell = $grid[$r + $dr * $k][$c + $dc * $k];
+                    if ($cell !== '' && $cell !== $e['chars'][$k]) {
+                        $fits = false;
+                        break;
+                    }
+                }
+                if (!$fits) {
+                    continue;
+                }
+                for ($k = 0; $k < $len; $k++) {
+                    $grid[$r + $dr * $k][$c + $dc * $k] = $e['chars'][$k];
+                }
+                $placed[$e['id']] = ['r' => $r, 'c' => $c, 'dr' => $dr, 'dc' => $dc, 'len' => $len];
+                $ok = true;
+            }
+            if (!$ok) {
+                $unplaced[] = $e['id'];
+            }
+        }
+
+        if (empty($unplaced) || $size >= WORDSEARCH_MAX_SIZE) {
+            break;
+        }
+        $size++;   // no cupieron todas: se agranda el tablero y se vuelve a intentar
+    }
+
+    // Relleno: mitad letras de las propias palabras (más difícil), mitad abecedario
+    $pool = [];
+    foreach ($entries as $e) {
+        foreach ($e['chars'] as $ch) {
+            $pool[] = $ch;
+        }
+    }
+    $alphabet = word_chars('AAAABCDEEEEFGHIIIJLLMNNÑOOOPQRRSSSTUUVXYZ');
+    $rng = wg_rng($seed ^ 0x5bd1e995);
+    for ($r = 0; $r < $size; $r++) {
+        for ($c = 0; $c < $size; $c++) {
+            if ($grid[$r][$c] === '') {
+                $useWord = !empty($pool) && $rng(2) === 0;
+                $grid[$r][$c] = $useWord ? $pool[$rng(count($pool))] : $alphabet[$rng(count($alphabet))];
+            }
+        }
+    }
+
+    return ['size' => $size, 'grid' => $grid, 'placed' => $placed, 'unplaced' => $unplaced];
+}
+
+/**
+ * Comprueba la línea que marcó el estudiante (de [r1,c1] a [r2,c2]). Devuelve el id de la palabra pendiente
+ * que deletrea (en cualquier sentido) o null. $pending: [['id','word'], ...] solo las aún no encontradas.
+ */
+function wordsearch_check_selection(array $layout, array $pending, int $r1, int $c1, int $r2, int $c2): ?int
+{
+    $size = $layout['size'];
+    foreach ([$r1, $c1, $r2, $c2] as $v) {
+        if ($v < 0 || $v >= $size) {
+            return null;
+        }
+    }
+    $dr = $r2 <=> $r1;
+    $dc = $c2 <=> $c1;
+    $lenR = abs($r2 - $r1);
+    $lenC = abs($c2 - $c1);
+    if ($lenR !== 0 && $lenC !== 0 && $lenR !== $lenC) {
+        return null;               // no es una línea recta
+    }
+    $len = max($lenR, $lenC) + 1;
+    if ($len < 2) {
+        return null;
+    }
+    $letters = '';
+    for ($k = 0; $k < $len; $k++) {
+        $letters .= $layout['grid'][$r1 + $dr * $k][$c1 + $dc * $k];
+    }
+    $reversed = implode('', array_reverse(word_chars($letters)));
+    foreach ($pending as $w) {
+        $target = word_letters($w['word']);
+        if ($target !== '' && ($target === $letters || $target === $reversed)) {
+            return (int) $w['id'];
+        }
+    }
+    return null;
+}
+
+/** Tablero de la sopa de letras con las palabras resaltadas (HTML seguro) para que el profesor lo revise. */
+function wordsearch_render_solution_html(array $layout): string
+{
+    $hot = [];
+    foreach ($layout['placed'] as $p) {
+        for ($k = 0; $k < $p['len']; $k++) {
+            $hot[($p['r'] + $p['dr'] * $k) . ',' . ($p['c'] + $p['dc'] * $k)] = true;
+        }
+    }
+    $html = '<div style="overflow-x:auto;"><table style="border-collapse:collapse; margin:8px 0;">';
+    for ($r = 0; $r < $layout['size']; $r++) {
+        $html .= '<tr>';
+        for ($c = 0; $c < $layout['size']; $c++) {
+            $on = isset($hot[$r . ',' . $c]);
+            $html .= '<td style="width:24px; height:24px; text-align:center; font-weight:700; font-size:0.85rem; border:1px solid #E3E9F2; '
+                . ($on ? 'background:#FDE68A;' : 'background:#fff; color:#64748B;') . '">'
+                . htmlspecialchars($layout['grid'][$r][$c], ENT_QUOTES, 'UTF-8') . '</td>';
+        }
+        $html .= '</tr>';
+    }
+    return $html . '</table></div>';
+}
+
+// ---------------------------------------------------------------------------
+// EMPAREJAR CONCEPTOS
+// ---------------------------------------------------------------------------
+//   - Cada fila del banco es una pareja: CONCEPTO (la "palabra") + DEFINICIÓN/PAREJA (la "pista").
+//   - Se muestran dos columnas barajadas. Las parejas se comprueban en el servidor; las tarjetas de la derecha
+//     llevan un código opaco (no el id de la pregunta) para que el navegador no pueda deducir las respuestas.
+
+/** Código opaco de la tarjeta derecha de una pareja. */
+function matching_right_token(int $questionId, int $seed): string
+{
+    return substr(hash_hmac('sha256', (string) $questionId, 'm' . $seed), 0, 12);
+}
+
+/**
+ * Tarjetas que ve el estudiante: ['left' => [['id','text']], 'right' => [['token','text']]], ya barajadas.
+ * $words: [['id','clue','word'], ...] (las parejas de este intento).
+ */
+function matching_public_cards(array $words, int $seed): array
+{
+    $left = array_map(fn($w) => ['id' => (int) $w['id'], 'text' => $w['word']], $words);
+    $right = array_map(fn($w) => ['token' => matching_right_token((int) $w['id'], $seed), 'text' => $w['clue']], $words);
+    return ['left' => wg_seeded_shuffle($left, $seed), 'right' => wg_seeded_shuffle($right, $seed + 1)];
+}
+
+/** Cuenta [aciertos a la primera, emparejadas, total] según el estado guardado ("m"). */
+function matching_counts(array $words, array $state): array
+{
+    $first = 0;
+    $matched = 0;
+    foreach ($words as $w) {
+        $m = $state['m'][(string) $w['id']] ?? null;
+        if ($m && !empty($m['ok'])) {
+            $matched++;
+            if ((int) ($m['w'] ?? 0) === 0) {
+                $first++;
+            }
+        }
+    }
+    return [$first, $matched, count($words)];
 }

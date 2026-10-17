@@ -196,3 +196,10 @@ Posibles ampliaciones futuras: fichas de estudio, preguntas con audio/video como
 - El navegador también reduce la foto antes de subirla (`assets/js/image_upload.js`).
 - Las imágenes de preguntas (partida en vivo, proyector, editor) usan rutas locales en vez de `APP_URL`, así se ven aunque el sitio se abra con otro dominio.
 - `teacher/optimize_images.php`: reduce por lotes las imágenes que ya estaban subidas (mismo nombre y formato).
+
+## Fase 14 — Descripciones en HTML y juegos nuevos (Sopa de letras, Emparejar conceptos)
+
+- **Descripción en HTML** (asignaciones y cuestionarios): `assignments.description_format` / `quizzes.description_format` (`text` | `html`, ver `database/schema_fase14.sql`). El profesor elige *Texto sencillo* o *HTML*; con HTML tiene barra de ayuda (título, lista, enlace, imagen, video, tabla) y vista previa. `includes/description_helpers.php` limpia el HTML con lista blanca al guardar y al mostrar (sin scripts/formularios/eventos; `<iframe>` solo de YouTube, Vimeo, Google Drive/Docs y otros sitios de `DESC_IFRAME_HOSTS`; estilos CSS filtrados). `includes/description_field.php` es el campo reutilizable; `api/teacher/preview_description.php` la vista previa.
+- **Sopa de letras** (`game_mode = 'sopa_letras'`): palabras de 2 a 15 letras escondidas en una cuadrícula (→ ↓ ↘ ↗) generada con una semilla guardada en el intento (`wordsearch_build_layout`). El estudiante marca la línea y el servidor comprueba (`api/wordgames/wordsearch.php`); las posiciones nunca salen al navegador. Nota = palabras encontradas ÷ total.
+- **Emparejar conceptos** (`game_mode = 'emparejar'`): cada fila del banco es concepto (opción) ↔ definición (enunciado). Dos columnas barajadas con códigos opacos en la derecha (`api/wordgames/matching.php`). Nota = parejas unidas bien a la primera ÷ total.
+- Ambos reutilizan el banco de palabras, el banco aleatorio por estudiante, importación Aiken, repetir (mejor nota), fechas y reportes de ahorcado/crucigrama. UI del estudiante: `assets/js/wg_wordsearch.js`, `assets/js/wg_matching.js`.

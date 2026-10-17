@@ -2,6 +2,7 @@
 define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/description_field.php';
 require_once __DIR__ . '/../includes/game_helpers.php'; // reutiliza question_type_label()
 require_once __DIR__ . '/../includes/quiz_helpers.php';
 require_once __DIR__ . '/../includes/aiken_helpers.php';
@@ -38,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'update_meta') {
         $title = clean_string($_POST['title'] ?? '');
-        $description = clean_string($_POST['description'] ?? '');
+        [$description, $descriptionFormat] = desc_prepare_for_save((string) ($_POST['description'] ?? ''), $_POST['description_format'] ?? 'text');
         $instructions = clean_string($_POST['instructions'] ?? '');
         $timeLimitRaw = trim($_POST['time_limit_minutes'] ?? '');
         $timeLimit = $timeLimitRaw === '' ? null : max(1, (int) $timeLimitRaw);
@@ -61,13 +62,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = 'Selecciona una asignatura válida.';
         } else {
             $pdo->prepare(
-                'UPDATE quizzes SET title = :title, description = :description, instructions = :instructions,
+                'UPDATE quizzes SET title = :title, description = :description, description_format = :description_format, instructions = :instructions,
                     subject_id = :subject_id,
                     time_limit_minutes = :time_limit_minutes, max_attempts = :max_attempts,
                     questions_per_attempt = :questions_per_attempt, updated_at = :updated_at
                  WHERE id = :id AND teacher_id = :teacher_id'
             )->execute([
-                'title' => $title, 'description' => $description, 'instructions' => $instructions,
+                'title' => $title, 'description' => $description, 'description_format' => $descriptionFormat, 'instructions' => $instructions,
                 'subject_id' => $subjectId,
                 'time_limit_minutes' => $timeLimit, 'max_attempts' => $maxAttempts,
                 'questions_per_attempt' => $questionsPerAttempt,
@@ -267,8 +268,7 @@ require __DIR__ . '/../includes/header.php';
                 <?php endforeach; ?>
             </select>
 
-            <label for="description">Descripción</label>
-            <textarea id="description" name="description" rows="2"><?= e($quiz['description']) ?></textarea>
+            <?php render_description_field('description', 'Descripción', (string) $quiz['description'], (string) ($quiz['description_format'] ?? 'text'), 4); ?>
 
             <label for="instructions">Instrucciones para el estudiante</label>
             <textarea id="instructions" name="instructions" rows="2"><?= e($quiz['instructions']) ?></textarea>

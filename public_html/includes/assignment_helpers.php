@@ -28,13 +28,14 @@ function assignment_create(
     int $points,
     ?string $projectType = null,
     ?int $quizId = null,
-    ?array $studentIds = null
+    ?array $studentIds = null,
+    string $descriptionFormat = 'text'
 ): int {
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare(
-            'INSERT INTO assignments (teacher_id, subject_id, activity_id, quiz_id, project_type, title, description, start_date, due_date, points, audience, created_at)
-             VALUES (:teacher_id, :subject_id, :activity_id, :quiz_id, :project_type, :title, :description, :start_date, :due_date, :points, :audience, :created_at)'
+            'INSERT INTO assignments (teacher_id, subject_id, activity_id, quiz_id, project_type, title, description, description_format, start_date, due_date, points, audience, created_at)
+             VALUES (:teacher_id, :subject_id, :activity_id, :quiz_id, :project_type, :title, :description, :description_format, :start_date, :due_date, :points, :audience, :created_at)'
         );
         $stmt->execute([
             'teacher_id'  => $teacherId,
@@ -44,6 +45,7 @@ function assignment_create(
             'project_type'=> $projectType,
             'title'       => $title,
             'description' => $description,
+            'description_format' => $descriptionFormat,
             'start_date'  => $startDate ?: null,
             'due_date'    => $dueDate ?: null,
             'points'      => $points,

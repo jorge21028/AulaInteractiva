@@ -1,6 +1,6 @@
 <?php
 /**
- * Ahorcado y Crucigrama INDIVIDUALES: el estudiante juega a su ritmo, sin cronómetro y sin que
+ * Ahorcado, Crucigrama, Sopa de letras y Emparejar conceptos INDIVIDUALES: el estudiante juega a su ritmo, sin cronómetro y sin que
  * el profesor inicie nada. El avance se guarda en el servidor; puede cerrar y continuar después.
  */
 define('AULA_APP', true);
@@ -22,7 +22,9 @@ if (!$assignment) {
 }
 
 $isHangman = $assignment['game_mode'] === 'ahorcado';
-$apiUrl = rtrim(APP_URL, '/') . '/api/wordgames/' . ($isHangman ? 'hangman.php' : 'crossword.php');
+$apiFiles = ['ahorcado' => 'hangman.php', 'crucigrama' => 'crossword.php', 'sopa_letras' => 'wordsearch.php', 'emparejar' => 'matching.php'];
+$apiUrl = rtrim(APP_URL, '/') . '/api/wordgames/' . ($apiFiles[$assignment['game_mode']] ?? 'crossword.php');
+$gameMode = $assignment['game_mode'];
 
 $pageTitle = $assignment['title'];
 require __DIR__ . '/../includes/header.php';
@@ -42,11 +44,14 @@ require __DIR__ . '/../includes/header.php';
 </section>
 
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/wordgames.js"></script>
+<script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/wg_wordsearch.js"></script>
+<script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/wg_matching.js"></script>
 <script>
 const API_URL = <?= json_encode($apiUrl) ?>;
 const ASSIGNMENT_ID = <?= (int) $assignmentId ?>;
 const CSRF_TOKEN = <?= json_encode(csrf_token()) ?>;
 const IS_HANGMAN = <?= $isHangman ? 'true' : 'false' ?>;
+const GAME_MODE = <?= json_encode($gameMode) ?>;
 const BACK_URL = <?= json_encode('assignment.php?id=' . (int) $assignmentId) ?>;
 const panel = document.getElementById('wg-panel');
 
@@ -275,7 +280,9 @@ window.addEventListener('pagehide', () => { if (!IS_HANGMAN) flushSave(); });
 /* ---------- Arranque ---------- */
 (async function init() {
     try {
-        if (IS_HANGMAN) applyHangmanView(await call('state'));
+        if (GAME_MODE === 'sopa_letras') WGWordSearch.start({ panel, call, backUrl: BACK_URL, showError, fmtScore });
+        else if (GAME_MODE === 'emparejar') WGMatching.start({ panel, call, backUrl: BACK_URL, showError, fmtScore });
+        else if (IS_HANGMAN) applyHangmanView(await call('state'));
         else applyCrossword(await call('load'));
     } catch (e) {
         showError('No se pudo cargar la actividad. Revisa tu conexión e intenta de nuevo.');

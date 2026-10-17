@@ -4,6 +4,7 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
+require_once __DIR__ . '/../includes/description_helpers.php';
 require_once __DIR__ . '/../includes/submission_admin_helpers.php';
 require_once __DIR__ . '/../includes/report_helpers.php'; // ¿el estudiante realmente envió la asignación?
 
@@ -234,10 +235,10 @@ function roster_progress(array $r, array $assignment): array
     }
 
     // --- Ahorcado / Crucigrama (individuales) ---
-    if (in_array($assignment['game_mode'] ?? null, ['ahorcado', 'crucigrama'], true)) {
+    if (in_array($assignment['game_mode'] ?? null, WORD_GAME_MODES, true)) {
         if ($r['wg_status'] === 'in_progress') {
             $st = json_decode((string) $r['wg_state'], true);
-            $hasProgress = is_array($st) && (!empty($st['w']) || !empty($st['cells']));
+            $hasProgress = is_array($st) && (!empty($st['w']) || !empty($st['cells']) || !empty($st['found']) || !empty($st['m']));
             return $hasProgress
                 ? ['state' => 'working', 'label' => '▶️ Jugando', 'detail' => 'última actividad ' . roster_time_ago($r['wg_updated_at']), 'link' => null]
                 : ['state' => 'opened', 'label' => '👀 Abrió, aún no empieza', 'detail' => roster_time_ago($r['wg_updated_at']), 'link' => null];
@@ -292,7 +293,7 @@ $inRoster = array_flip(array_map(fn($r) => (int) $r['student_id'], $roster));
 $courseStudents = course_students_for_subject($pdo, (int) $assignment['subject_id']);
 $notAssigned = array_values(array_filter($courseStudents, fn($s) => !isset($inRoster[(int) $s['id']])));
 $isTargeted = ($assignment['audience'] ?? 'all') === 'selected';
-$isLiveActivity = !empty($assignment['activity_id']) && !in_array($assignment['game_mode'] ?? null, ['ahorcado', 'crucigrama'], true);
+$isLiveActivity = !empty($assignment['activity_id']) && !in_array($assignment['game_mode'] ?? null, WORD_GAME_MODES, true);
 
 $pageTitle = $assignment['title'];
 require __DIR__ . '/../includes/header.php';
@@ -340,7 +341,7 @@ require __DIR__ . '/../includes/header.php';
 <p><a class="btn btn-secondary" href="assignment_edit.php?id=<?= (int) $assignmentId ?>">✏️ Editar asignación</a></p>
 
 <?php if ($assignment['description']): ?>
-    <div class="card"><?= nl2br(e($assignment['description'])) ?></div>
+    <div class="card"><?= render_description($assignment['description'], $assignment['description_format'] ?? 'text') ?></div>
 <?php endif; ?>
 
 <?php if ($assignment['activity_id']): ?>

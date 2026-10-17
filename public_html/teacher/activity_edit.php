@@ -27,7 +27,7 @@ if (!$activity) {
     exit('Actividad no encontrada.');
 }
 
-$isWordGame = game_mode_is_word_game($activity['game_mode']); // ahorcado / crucigrama
+$isWordGame = game_mode_is_word_game($activity['game_mode']); // ahorcado / crucigrama / sopa de letras / emparejar
 
 // Asignaturas del profesor (para poder mover la actividad a otra)
 $subjStmt = $pdo->prepare(
@@ -125,7 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $wordError = word_validate_for_mode($word, $activity['game_mode']);
 
             if ($clue === '') {
-                $errors[] = 'La pista no puede estar vacía.';
+                $errors[] = $activity['game_mode'] === 'emparejar' ? 'La definición (pareja) no puede estar vacía.' : 'La pista no puede estar vacía.';
             } elseif ($wordError !== null) {
                 $errors[] = $wordError;
             } else {
@@ -135,7 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($res['inserted'] > 0) {
                     $notice = 'Palabra agregada.';
                 } else {
-                    $errors[] = 'Esa palabra ya está en el crucigrama.';
+                    $errors[] = 'Esa palabra ya está en ' . word_mode_with_article($activity['game_mode']) . '.';
                 }
             }
         }
@@ -232,7 +232,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $notice .= " Ojo: pediste {$newLimit} por estudiante pero el banco tiene {$bankTotal}; por ahora recibirán todas.";
                         }
                         foreach ($res['skipped'] as $dup) {
-                            $errors[] = 'La palabra "' . $dup . '" ya estaba en el crucigrama; se omitió.';
+                            $errors[] = 'La palabra "' . $dup . '" ya estaba en ' . word_mode_with_article($activity['game_mode']) . '; se omitió.';
                         }
                     } else {
                         $errors[] = 'No se encontró ninguna palabra válida en el archivo.';
@@ -344,6 +344,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($activity['status'] === 'draft' && $activity['game_mode'] === 'crucigrama'
             && count(crossword_build_layout(word_activity_words($pdo, $activityId))['words']) < 2) {
             $errors[] = 'Un crucigrama necesita al menos 2 palabras que se crucen entre sí. Agrega más palabras (con letras en común).';
+        } elseif ($activity['status'] === 'draft' && $activity['game_mode'] === 'emparejar' && $totalQuestions < 2) {
+            $errors[] = 'Emparejar conceptos necesita al menos 2 parejas.';
         } else {
             $newStatus = $activity['status'] === 'draft' ? 'published' : 'draft';
             $pdo->prepare('UPDATE activities SET status = :status WHERE id = :id')->execute(['status' => $newStatus, 'id' => $activityId]);
@@ -379,6 +381,17 @@ require __DIR__ . '/../includes/header.php';
         Actividad "Crucigrama" individual: escribes las pistas y sus respuestas y el tablero se arma solo (las palabras se cruzan
         por las letras que tienen en común). El estudiante lo resuelve a su ritmo, sin cronómetro, y su avance se guarda solo.
         Nota = palabras acertadas ÷ total de palabras.
+    </p>
+<?php elseif ($activity['game_mode'] === 'sopa_letras'): ?>
+    <p class="text-muted" style="margin-top:-8px;">
+        Actividad "Sopa de letras" individual: escribes las palabras (de 2 a 15 letras) y la cuadrícula se arma sola, escondiéndolas en
+        horizontal, vertical y diagonal. En la lista, el estudiante ve la <strong>pista</strong> de cada palabra (si quieres que vea la
+        palabra misma, escríbela como pista). Lo resuelve a su ritmo y su avance se guarda solo. Nota = palabras encontradas ÷ total.
+    </p>
+<?php elseif ($activity['game_mode'] === 'emparejar'): ?>
+    <p class="text-muted" style="margin-top:-8px;">
+        Actividad "Emparejar conceptos" individual: cada fila es una pareja <strong>concepto ↔ definición</strong>. El estudiante ve dos columnas
+        mezcladas y une cada concepto con su pareja. Nota = parejas unidas bien <strong>a la primera</strong> ÷ total de parejas.
     </p>
 <?php endif; ?>
 
@@ -536,8 +549,10 @@ ANSWER: B</pre>
 ANSWER: Fotosíntesis</pre>
             <p class="text-muted" style="font-size:0.8rem;">
                 Separa cada palabra con una línea en blanco. Las tildes no importan al jugar (los estudiantes escriben sin tilde).
-                <?php if ($activity['game_mode'] === 'crucigrama'): ?>
-                    En el crucigrama las palabras deben tener de 2 a 15 letras, sin números ni símbolos, y no pueden repetirse.
+                <?php if ($activity['game_mode'] === 'crucigrama' || $activity['game_mode'] === 'sopa_letras'): ?>
+                    En <?= $activity['game_mode'] === 'sopa_letras' ? 'la sopa de letras' : 'el crucigrama' ?> las palabras deben tener de 2 a 15 letras, sin números ni símbolos, y no pueden repetirse.
+                <?php elseif ($activity['game_mode'] === 'emparejar'): ?>
+                    En emparejar conceptos el enunciado es la <strong>definición</strong> y la respuesta es el <strong>concepto</strong> (hasta 80 caracteres, puede llevar números y símbolos). No pueden repetirse conceptos.
                 <?php else: ?>
                     En el ahorcado puedes usar frases cortas (hasta 40 caracteres).
                 <?php endif; ?>
@@ -567,10 +582,10 @@ ANSWER: Fotosíntesis</pre>
                 <div class="card" style="margin-bottom:10px; padding:14px 16px;">
                     <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
                         <div>
-                            <strong><?= $i + 1 ?>. <?= $q['type'] === 'palabra' ? '💡 ' : '' ?><?= e(truncate_text($q['statement'], 80)) ?></strong>
+                            <strong><?= $i + 1 ?>. <?= $q['type'] === 'palabra' ? ($activity['game_mode'] === 'emparejar' ? '↔️ ' : '💡 ') : '' ?><?= e(truncate_text($q['statement'], 80)) ?></strong>
                             <p class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">
                                 <?php if ($q['type'] === 'palabra'): ?>
-                                    Respuesta: <strong><?= e($q['options'][0]['text'] ?? '—') ?></strong>
+                                    <?= $activity['game_mode'] === 'emparejar' ? 'Concepto' : 'Respuesta' ?>: <strong><?= e($q['options'][0]['text'] ?? '—') ?></strong>
                                 <?php else: ?>
                                     <?= e(question_type_label($q['type'])) ?> ·
                                     <?= (int) $q['time_seconds'] ?>s · <?= (int) $q['points'] ?> pts ·
@@ -662,20 +677,39 @@ ANSWER: Fotosíntesis</pre>
             </div>
         <?php endif; endif; ?>
 
+        <?php if ($activity['game_mode'] === 'sopa_letras' && !empty($questions)):
+            $wsBank = word_activity_words($pdo, $activityId);
+            $wsLayout = wordsearch_build_layout($wsBank, 20240101); ?>
+            <div class="card" style="background:#F8FAFC; margin-top:16px;">
+                <h3 style="margin-top:0;">Vista previa de la cuadrícula (con respuestas en amarillo)</h3>
+                <p class="text-muted" style="font-size:0.85rem; margin-top:-6px;">
+                    <?= count($wsLayout['placed']) ?> palabras escondidas · <?= (int) $wsLayout['size'] ?> × <?= (int) $wsLayout['size'] ?> casillas.
+                    Es solo un ejemplo: cada estudiante recibe su propia cuadrícula (las letras de relleno y las posiciones cambian).
+                </p>
+                <?= wordsearch_render_solution_html($wsLayout) ?>
+                <?php if (!empty($wsLayout['unplaced'])): ?>
+                    <div class="alert alert-error" style="font-size:0.85rem;">
+                        No cupieron todas las palabras en la cuadrícula. Usa menos palabras por estudiante o palabras más cortas.
+                    </div>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
         <?php if ($isWordGame): ?>
         <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" style="margin-top:16px;" id="add-word-form">
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="add_word">
 
-            <h3 style="margin-bottom:0;">Agregar una palabra</h3>
+            <?php $isMatch = $activity['game_mode'] === 'emparejar'; ?>
+            <h3 style="margin-bottom:0;"><?= $isMatch ? 'Agregar una pareja' : 'Agregar una palabra' ?></h3>
 
-            <label for="clue">Pista (enunciado)</label>
-            <textarea id="clue" name="clue" rows="2" required placeholder="Ej: Proceso por el que las plantas fabrican su alimento"></textarea>
+            <label for="clue"><?= $isMatch ? 'Definición / pareja del concepto' : 'Pista (enunciado)' ?></label>
+            <textarea id="clue" name="clue" rows="2" required placeholder="<?= $isMatch ? 'Ej: Proceso por el que las plantas fabrican su alimento' : 'Ej: Proceso por el que las plantas fabrican su alimento' ?>"></textarea>
 
-            <label for="word">Palabra (respuesta)</label>
-            <input type="text" id="word" name="word" required maxlength="40" autocomplete="off" placeholder="Ej: Fotosíntesis">
+            <label for="word"><?= $isMatch ? 'Concepto' : 'Palabra (respuesta)' ?></label>
+            <input type="text" id="word" name="word" required maxlength="<?= $isMatch ? 80 : 40 ?>" autocomplete="off" placeholder="Ej: Fotosíntesis">
 
-            <button type="submit" class="btn">Agregar palabra</button>
+            <button type="submit" class="btn"><?= $isMatch ? 'Agregar pareja' : 'Agregar palabra' ?></button>
         </form>
         <?php else: ?>
         <form method="post" action="activity_edit.php?id=<?= (int) $activityId ?>" style="margin-top:16px;" id="add-question-form">

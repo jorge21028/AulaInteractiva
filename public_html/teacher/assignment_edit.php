@@ -11,6 +11,7 @@ require_once __DIR__ . '/../includes/game_helpers.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
 require_once __DIR__ . '/../includes/space_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
+require_once __DIR__ . '/../includes/description_field.php';
 
 require_role('teacher');
 
@@ -45,6 +46,7 @@ $gradedCount = (int) ($gradedStmt->fetch()['total'] ?? 0);
 $form = [
     'title'       => $assignment['title'],
     'description' => (string) $assignment['description'],
+    'description_format' => (string) ($assignment['description_format'] ?? 'text'),
     'start_date'  => dt_to_input($assignment['start_date']),
     'due_date'    => dt_to_input($assignment['due_date']),
     'points'      => (string) $assignment['points'],
@@ -54,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify($_POST['csrf_token'] ?? null);
 
     $form['title'] = clean_string($_POST['title'] ?? '');
-    $form['description'] = clean_string($_POST['description'] ?? '');
+    [$form['description'], $form['description_format']] = desc_prepare_for_save((string) ($_POST['description'] ?? ''), $_POST['description_format'] ?? 'text');
     $form['start_date'] = clean_string($_POST['start_date'] ?? '');
     $form['due_date'] = clean_string($_POST['due_date'] ?? '');
     $form['points'] = trim((string) ($_POST['points'] ?? ''));
@@ -81,11 +83,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (empty($errors)) {
         $pdo->prepare(
-            'UPDATE assignments SET title = :title, description = :description, start_date = :start_date,
+            'UPDATE assignments SET title = :title, description = :description, description_format = :description_format, start_date = :start_date,
                     due_date = :due_date, points = :points
              WHERE id = :id AND teacher_id = :tid'
         )->execute([
-            'title' => $form['title'], 'description' => $form['description'], 'start_date' => $startDate,
+            'title' => $form['title'], 'description' => $form['description'], 'description_format' => $form['description_format'], 'start_date' => $startDate,
             'due_date' => $dueDate, 'points' => $points, 'id' => $assignmentId, 'tid' => $teacherId,
         ]);
         audit_log($pdo, $teacherId, 'update_assignment', "Asignación #{$assignmentId} editada ('{$form['title']}')");
@@ -115,8 +117,7 @@ require __DIR__ . '/../includes/header.php';
         <label for="title">Título de la asignación</label>
         <input type="text" id="title" name="title" required value="<?= e($form['title']) ?>">
 
-        <label for="description">Descripción / instrucciones</label>
-        <textarea id="description" name="description" rows="4"><?= e($form['description']) ?></textarea>
+        <?php render_description_field('description', 'Descripción / instrucciones', $form['description'], $form['description_format'], 6); ?>
 
         <label for="start_date">Fecha y hora de inicio (opcional)</label>
         <input type="datetime-local" id="start_date" name="start_date" value="<?= e($form['start_date']) ?>">
