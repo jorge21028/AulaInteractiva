@@ -366,6 +366,7 @@ require __DIR__ . '/../includes/header.php';
         (<?= $activity['status'] === 'published' ? 'Publicada' : 'Borrador' ?>)
     </span>
 </h1>
+<p style="margin-top:-6px;"><a href="delete_item.php?type=activity&amp;id=<?= (int) $activityId ?>" style="color:#B91C1C; font-size:0.9rem;">🗑️ Eliminar esta actividad</a></p>
 <?php if ($activity['game_mode'] === 'sapito'): ?>
     <p class="text-muted" style="margin-top:-8px;">
         Actividad de integración "El Sapito": el estudiante arrastra la respuesta hasta el nenúfar correcto.

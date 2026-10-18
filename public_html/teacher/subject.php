@@ -64,6 +64,7 @@ require __DIR__ . '/../includes/header.php';
 <div class="space-head">
     <div>
         <h1><?= e($subject['name']) ?></h1>
+        <?php if (($_GET['deleted'] ?? '') === 'assignment'): ?><div class="alert alert-success">Asignación eliminada.</div><?php endif; ?>
         <p class="space-sub"><?= e($subject['course_name']) ?></p>
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">

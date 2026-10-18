@@ -338,7 +338,13 @@ require __DIR__ . '/../includes/header.php';
         ⌛ <strong>Vencida.</strong> Los estudiantes la ven como vencida y ya no pueden entregar. Si quieres darles más tiempo, edita la fecha de entrega.
     </div>
 <?php endif; ?>
-<p><a class="btn btn-secondary" href="assignment_edit.php?id=<?= (int) $assignmentId ?>">✏️ Editar asignación</a></p>
+<p>
+    <a class="btn btn-secondary" href="assignment_edit.php?id=<?= (int) $assignmentId ?>">✏️ Editar asignación</a>
+    <?php if (!empty($assignment['project_type'])): ?>
+        <a class="btn btn-secondary" href="delete_images.php?assignment=<?= (int) $assignmentId ?>">🖼️ Borrar imágenes de los trabajos</a>
+    <?php endif; ?>
+    <a class="btn btn-secondary" style="color:#B91C1C; border-color:#B91C1C;" href="delete_item.php?type=assignment&amp;id=<?= (int) $assignmentId ?>">🗑️ Eliminar asignación</a>
+</p>
 
 <?php if ($assignment['description']): ?>
     <div class="card"><?= render_description($assignment['description'], $assignment['description_format'] ?? 'text') ?></div>

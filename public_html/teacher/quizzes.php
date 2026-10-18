@@ -73,6 +73,7 @@ require __DIR__ . '/../includes/header.php';
 ?>
 <p><a href="dashboard.php">&larr; Volver al panel</a></p>
 <h1>📝 Cuestionarios</h1>
+<?php if (($_GET['deleted'] ?? '') === 'quiz'): ?><div class="alert alert-success">Cuestionario eliminado.</div><?php endif; ?>
 <p class="text-muted" style="margin-top:-8px;">
     A diferencia de las actividades en vivo (Trivia / El Sapito), el cuestionario lo resuelve cada estudiante
     a su propio ritmo, dentro de la fecha límite que definas al asignarlo — como en Moodle.
@@ -128,6 +129,7 @@ require __DIR__ . '/../includes/header.php';
                             <?= $q['time_limit_minutes'] ? (int) $q['time_limit_minutes'] . ' min' : 'sin límite de tiempo' ?>
                         </p>
                     </a>
+                    <p style="text-align:right; margin:-6px 0 10px;"><a href="delete_item.php?type=quiz&amp;id=<?= (int) $q['id'] ?>" class="text-muted" style="font-size:0.8rem;">🗑️ Eliminar</a></p>
                 <?php endforeach; ?>
             </div>
         <?php endif; ?>

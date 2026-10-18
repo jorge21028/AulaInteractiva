@@ -203,3 +203,10 @@ Posibles ampliaciones futuras: fichas de estudio, preguntas con audio/video como
 - **Sopa de letras** (`game_mode = 'sopa_letras'`): palabras de 2 a 15 letras escondidas en una cuadrícula (→ ↓ ↘ ↗) generada con una semilla guardada en el intento (`wordsearch_build_layout`). El estudiante marca la línea y el servidor comprueba (`api/wordgames/wordsearch.php`); las posiciones nunca salen al navegador. Nota = palabras encontradas ÷ total.
 - **Emparejar conceptos** (`game_mode = 'emparejar'`): cada fila del banco es concepto (opción) ↔ definición (enunciado). Dos columnas barajadas con códigos opacos en la derecha (`api/wordgames/matching.php`). Nota = parejas unidas bien a la primera ÷ total.
 - Ambos reutilizan el banco de palabras, el banco aleatorio por estudiante, importación Aiken, repetir (mejor nota), fechas y reportes de ahorcado/crucigrama. UI del estudiante: `assets/js/wg_wordsearch.js`, `assets/js/wg_matching.js`.
+
+## Fase 15 — Eliminar asignaciones, actividades y cuestionarios; borrar imágenes de trabajos
+
+- `includes/delete_helpers.php` + `teacher/delete_item.php`: eliminación con pantalla de confirmación (resumen de lo que se borra, casilla de confirmación, CSRF, solo el dueño). Asignación → entregas, trabajos de estudiantes (y sus archivos), intentos de cuestionario/juegos. Actividad → preguntas e imágenes, partidas en vivo y todas las asignaciones que la usan. Cuestionario → preguntas, intentos y todas las asignaciones que lo usan (los cuestionarios no tienen claves foráneas en la BD, así que se borra por código, en una transacción).
+- Los archivos del disco se borran después de confirmar la BD y solo si ningún otro trabajo o pregunta los sigue usando.
+- `teacher/delete_images.php`: borra todas las imágenes subidas por estudiantes en las asignaciones elegidas (quita las imágenes del contenido del trabajo —galería, lienzos, `<img>` del texto— y elimina los archivos); el resto del trabajo se conserva.
+- Sin cambios en la base de datos.

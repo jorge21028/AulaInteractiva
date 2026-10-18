@@ -241,6 +241,7 @@ require __DIR__ . '/../includes/header.php';
         (<?= $quiz['status'] === 'published' ? 'Publicado' : 'Borrador' ?>)
     </span>
 </h1>
+<p style="margin-top:-6px;"><a href="delete_item.php?type=quiz&amp;id=<?= (int) $quiz['id'] ?>" style="color:#B91C1C; font-size:0.9rem;">🗑️ Eliminar este cuestionario</a></p>
 
 <?php foreach ($errors as $error): ?>
     <div class="alert alert-error"><?= e($error) ?></div>

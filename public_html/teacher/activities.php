@@ -83,6 +83,7 @@ require __DIR__ . '/../includes/header.php';
 ?>
 <p><a href="dashboard.php">&larr; Volver al panel</a></p>
 <h1>Actividades interactivas</h1>
+<?php if (($_GET['deleted'] ?? '') === 'activity'): ?><div class="alert alert-success">Actividad eliminada.</div><?php endif; ?>
 
 <?php foreach ($errors as $error): ?>
     <div class="alert alert-error"><?= e($error) ?></div>
@@ -145,6 +146,7 @@ require __DIR__ . '/../includes/header.php';
                             Dificultad: <?= e($a['difficulty']) ?>
                         </p>
                     </a>
+                    <p style="text-align:right; margin:-6px 0 10px;"><a href="delete_item.php?type=activity&amp;id=<?= (int) $a['id'] ?>" class="text-muted" style="font-size:0.8rem;">🗑️ Eliminar</a></p>
                 <?php endforeach; ?>
             </div>
         <?php endif; ?>
