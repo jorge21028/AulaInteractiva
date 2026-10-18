@@ -63,6 +63,7 @@ if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
     error_log('upload_media.php: move_uploaded_file failed for ' . $storedName);
     json_response(['success' => false, 'message' => 'No fue posible guardar el archivo.'], 500);
 }
+@chmod($targetPath, 0644);
 
 $mimeType = mime_content_type($targetPath) ?: ($kind === 'audio' ? 'audio/mpeg' : 'video/mp4');
 

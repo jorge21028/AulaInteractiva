@@ -210,3 +210,9 @@ Posibles ampliaciones futuras: fichas de estudio, preguntas con audio/video como
 - Los archivos del disco se borran después de confirmar la BD y solo si ningún otro trabajo o pregunta los sigue usando.
 - `teacher/delete_images.php`: borra todas las imágenes subidas por estudiantes en las asignaciones elegidas (quita las imágenes del contenido del trabajo —galería, lienzos, `<img>` del texto— y elimina los archivos); el resto del trabajo se conserva.
 - Sin cambios en la base de datos.
+
+## Fase 16 — Imágenes que no se visualizan (icono de imagen rota)
+
+- Causa probable: `uploads/.htaccess` usaba `Options -ExecCGI` y `AddHandler`; en hostings con `AllowOverride` restringido Apache devuelve **error 500 en todos los archivos** de `uploads/` (incluidas las imágenes). Se reproduce con Apache 2.4 y `AllowOverride FileInfo AuthConfig Limit Indexes`. El `.htaccess` corregido solo usa `<FilesMatch>` + `Require all denied` (se mantiene bloqueada la ejecución de scripts). Este archivo vive solo en el hosting (no está en el repositorio).
+- Los archivos subidos ahora se guardan con permisos `0644` (`move_uploaded_file` los deja en `0600`, ilegibles para el servidor web en algunos hostings).
+- `teacher/diagnose_images.php`: prueba en el navegador la imagen por la dirección normal y por PHP (`api/media/image.php`), muestra el veredicto y ofrece reparar (`.htaccess` corregido, permisos, quitar `.htaccess`).

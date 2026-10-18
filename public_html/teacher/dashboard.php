@@ -97,7 +97,8 @@ require __DIR__ . '/../includes/header.php';
     <?php endif; ?>
     <p style="margin:0 0 8px;"><a class="btn btn-secondary" style="margin:0; padding:6px 14px; font-size:0.85rem;" href="inactive_courses.php">📦 Cursos inactivos (<?= (int) $inactiveCount ?>)</a>
         <a class="btn btn-secondary" style="margin:0 0 0 6px; padding:6px 14px; font-size:0.85rem;" href="optimize_images.php">🖼️ Optimizar imágenes</a>
-        <a class="btn btn-secondary" style="margin:0 0 0 6px; padding:6px 14px; font-size:0.85rem;" href="delete_images.php">🗑️ Borrar imágenes de trabajos</a></p>
+        <a class="btn btn-secondary" style="margin:0 0 0 6px; padding:6px 14px; font-size:0.85rem;" href="delete_images.php">🗑️ Borrar imágenes de trabajos</a>
+        <a class="btn btn-secondary" style="margin:0 0 0 6px; padding:6px 14px; font-size:0.85rem;" href="diagnose_images.php">🔧 Diagnóstico de imágenes</a></p>
     <p class="text-muted" style="margin-top:0;">Entra a un curso para ver sus asignaturas y el estado de cada asignación.</p>
 
     <?php foreach ($errors as $error): ?>

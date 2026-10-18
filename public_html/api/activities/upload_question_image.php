@@ -106,6 +106,7 @@ if ($opt['size'] > UPLOAD_MAX_IMAGE_BYTES) {
     @unlink($targetPath);
     json_response(['success' => false, 'message' => 'La imagen sigue siendo muy pesada incluso reducida. Prueba con otra.'], 400);
 }
+@chmod($targetPath, 0644);   // el servidor web debe poder leer la imagen (move_uploaded_file la deja en 0600)
 $imageInfo['mime'] = $opt['mime'];
 $file['size'] = $opt['size'];
 
