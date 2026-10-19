@@ -223,3 +223,9 @@ Posibles ampliaciones futuras: fichas de estudio, preguntas con audio/video como
 - **Entrar como profesor** (`admin/impersonate.php`, `stop_impersonation.php`, helpers en `includes/auth.php`): la sesión actúa como el profesor y el administrador conserva su identidad en `$_SESSION['impersonator']`; así todas las pantallas del profesor funcionan sin cambios y el administrador ve y edita todo lo de todos los profesores. Un aviso fijo permite volver; cada acción en `audit_log` lleva la marca `[admin #id]`.
 - Panel (`admin/`): estadísticas globales, profesores (entrar como, restablecer contraseña, activar/desactivar), todos los cursos (abrir como su profesor, activar/inactivar), estudiantes (buscar, restablecer contraseña, activar/desactivar), registro de actividad y crear usuarios (profesor o administrador).
 - Seguridad: solo el rol `admin` accede a `admin/`; suplantar exige CSRF y solo a profesores; contraseñas temporales con cambio obligatorio; las cuentas desactivadas pierden la sesión abierta en ≤ 5 min; límite de 5 intentos fallidos de inicio de sesión por correo cada 15 min.
+
+## Fase 18 — Herramientas de imágenes solo para el súper administrador
+
+- `admin/images.php` (menú **🖼️ Imágenes**) agrupa: `admin/optimize_images.php`, `admin/delete_images.php` (ahora con alcance **global**: asignaciones de todos los profesores, mostrando el profesor) y `admin/diagnose_images.php`. Todas exigen el rol `admin`.
+- `teacher/optimize_images.php`, `teacher/delete_images.php` y `teacher/diagnose_images.php` quedan como archivos que solo redirigen al panel (así ninguna copia o enlace antiguo da acceso a un profesor). Se quitaron sus botones del panel del profesor y de la pantalla de la asignación.
+- `delete_images_overview()` y `delete_assignment_images()` aceptan `$teacherId = null` (alcance de administrador).

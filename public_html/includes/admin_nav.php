@@ -1,5 +1,5 @@
 <?php
-/** Barra de navegación del súper administrador. $adminActive = 'dashboard'|'courses'|'students'|'audit'|'create' */
+/** Barra de navegación del súper administrador. $adminActive = 'dashboard'|'courses'|'students'|'images'|'audit'|'create' */
 if (!defined('AULA_APP')) {
     http_response_code(403);
     exit('Acceso directo no permitido.');
@@ -10,6 +10,7 @@ $adminTabs = [
     'dashboard' => ['🏠 Panel', 'dashboard.php'],
     'courses'   => ['📚 Cursos', 'courses.php'],
     'students'  => ['🎓 Estudiantes', 'students.php'],
+    'images'    => ['🖼️ Imágenes', 'images.php'],
     'audit'     => ['🧾 Registro', 'audit.php'],
     'create'    => ['➕ Crear usuario', 'create_user.php'],
 ];

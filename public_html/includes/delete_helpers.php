@@ -139,17 +139,17 @@ function delete_strip_images($value, array &$names)
 // ---------------------------------------------------------------------------
 
 /** Asignaciones del profesor con trabajos de creación e información de sus imágenes. */
-function delete_images_overview(PDO $pdo, int $teacherId): array
+function delete_images_overview(PDO $pdo, ?int $teacherId = null): array
 {
-    $stmt = $pdo->prepare(
-        'SELECT a.id, a.title, a.project_type, s.name AS subject_name, c.name AS course_name, c.is_active
-         FROM assignments a
-         INNER JOIN subjects s ON s.id = a.subject_id
-         INNER JOIN courses c ON c.id = s.course_id
-         WHERE a.teacher_id = :tid AND a.project_type IS NOT NULL
-         ORDER BY c.name, s.name, a.title'
-    );
-    $stmt->execute(['tid' => $teacherId]);
+    $sql = 'SELECT a.id, a.title, a.project_type, s.name AS subject_name, c.name AS course_name, c.is_active, u.name AS teacher_name
+            FROM assignments a
+            INNER JOIN subjects s ON s.id = a.subject_id
+            INNER JOIN courses c ON c.id = s.course_id
+            INNER JOIN users u ON u.id = a.teacher_id
+            WHERE a.project_type IS NOT NULL' . ($teacherId !== null ? ' AND a.teacher_id = :tid' : '') . '
+            ORDER BY u.name, c.name, s.name, a.title';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($teacherId !== null ? ['tid' => $teacherId] : []);
     $rows = $stmt->fetchAll();
 
     foreach ($rows as &$r) {
@@ -201,7 +201,7 @@ function delete_assignment_image_info(PDO $pdo, int $assignmentId): array
  * audio, video) se conserva.
  * Devuelve ['files' => n, 'bytes' => b, 'projects' => m].
  */
-function delete_assignment_images(PDO $pdo, int $teacherId, array $assignmentIds): array
+function delete_assignment_images(PDO $pdo, ?int $teacherId, array $assignmentIds): array
 {
     $assignmentIds = array_values(array_unique(array_filter(array_map('intval', $assignmentIds))));
     $result = ['files' => 0, 'bytes' => 0, 'projects' => 0];
@@ -210,8 +210,9 @@ function delete_assignment_images(PDO $pdo, int $teacherId, array $assignmentIds
     }
 
     $in = implode(',', array_fill(0, count($assignmentIds), '?'));
-    $own = $pdo->prepare("SELECT id FROM assignments WHERE teacher_id = ? AND id IN ($in)");
-    $own->execute(array_merge([$teacherId], $assignmentIds));
+    // $teacherId = null: administrador (cualquier asignación); si no, solo las de ese profesor.
+    $own = $pdo->prepare('SELECT id FROM assignments WHERE ' . ($teacherId !== null ? 'teacher_id = ? AND ' : '') . "id IN ($in)");
+    $own->execute($teacherId !== null ? array_merge([$teacherId], $assignmentIds) : $assignmentIds);
     $ownIds = array_map('intval', array_column($own->fetchAll(), 'id'));
     if (empty($ownIds)) {
         return $result;
