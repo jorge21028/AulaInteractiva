@@ -58,6 +58,10 @@ function truncate_text(string $text, int $length = 120): string
 function audit_log(PDO $pdo, ?int $userId, string $action, string $details = ''): void
 {
     try {
+        // Si un administrador está actuando como un profesor, queda registrado en cada acción.
+        if (function_exists('is_impersonating') && is_impersonating() && !in_array($action, ['impersonate_start', 'impersonate_stop'], true)) {
+            $details = mb_substr('[admin #' . (int) $_SESSION['impersonator']['id'] . '] ' . $details, 0, 500);
+        }
         $stmt = $pdo->prepare(
             "INSERT INTO audit_log (user_id, action, details, created_at) VALUES (:user_id, :action, :details, :created_at)"
         );

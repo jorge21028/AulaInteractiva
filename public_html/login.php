@@ -19,10 +19,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Completa correo y contraseña.';
     } else {
         $pdo = Database::getConnection();
-        if (attempt_login($pdo, $email, $password)) {
+
+        // Límite de intentos: 5 fallos en 15 minutos para el mismo correo bloquean el acceso temporalmente.
+        $since = date('Y-m-d H:i:s', time() - 900);
+        $failKey = 'email=' . mb_strtolower($email, 'UTF-8');
+        $fails = $pdo->prepare("SELECT COUNT(*) FROM audit_log WHERE action = 'login_failed' AND details = :d AND created_at >= :since");
+        $fails->execute(['d' => $failKey, 'since' => $since]);
+
+        if ((int) $fails->fetchColumn() >= 5) {
+            $errors[] = 'Demasiados intentos fallidos. Espera 15 minutos e inténtalo de nuevo.';
+        } elseif (attempt_login($pdo, $email, $password)) {
             audit_log($pdo, current_user_id(), 'login', 'Inicio de sesión exitoso');
             redirect(dashboard_url_for_role(current_role()));
         } else {
+            audit_log($pdo, null, 'login_failed', $failKey);
             $errors[] = 'Correo o contraseña incorrectos.';
         }
     }

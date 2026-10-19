@@ -45,6 +45,82 @@ function current_user_name(): ?string
     return $_SESSION['user_name'] ?? null;
 }
 
+// ---------------------------------------------------------------------------
+// Súper administrador: "entrar como" un profesor
+// ---------------------------------------------------------------------------
+// El administrador conserva su identidad real en $_SESSION['impersonator']; mientras tanto la sesión actúa como
+// el profesor (user_id/user_role del profesor), así TODAS las pantallas del profesor funcionan sin cambios.
+
+/** ¿El administrador está viendo el sistema como otro usuario? */
+function is_impersonating(): bool
+{
+    return !empty($_SESSION['impersonator']['id']);
+}
+
+/** ID del usuario REAL (el administrador si está suplantando; si no, el usuario de la sesión). */
+function real_user_id(): ?int
+{
+    return $_SESSION['impersonator']['id'] ?? ($_SESSION['user_id'] ?? null);
+}
+
+/**
+ * Empieza a actuar como un profesor. Solo un administrador activo puede hacerlo.
+ */
+function start_impersonation(PDO $pdo, int $teacherId): bool
+{
+    if (is_impersonating() || current_role() !== 'admin') {
+        return false;
+    }
+    $adminId = (int) current_user_id();
+
+    $admin = $pdo->prepare("SELECT id, name, email FROM users WHERE id = :id AND role = 'admin' AND is_active = 1");
+    $admin->execute(['id' => $adminId]);
+    $adminRow = $admin->fetch();
+
+    $teacher = $pdo->prepare("SELECT id, name, email FROM users WHERE id = :id AND role = 'teacher'");
+    $teacher->execute(['id' => $teacherId]);
+    $teacherRow = $teacher->fetch();
+    if (!$adminRow || !$teacherRow) {
+        return false;
+    }
+
+    session_regenerate_id(true);
+    $_SESSION['impersonator'] = ['id' => (int) $adminRow['id'], 'name' => $adminRow['name'], 'email' => $adminRow['email']];
+    $_SESSION['user_id']    = (int) $teacherRow['id'];
+    $_SESSION['user_name']  = $teacherRow['name'];
+    $_SESSION['user_email'] = $teacherRow['email'];
+    $_SESSION['user_role']  = 'teacher';
+    audit_log($pdo, $adminId, 'impersonate_start', "El administrador entró como profesor #{$teacherId} ({$teacherRow['email']})");
+    return true;
+}
+
+/** Vuelve a la sesión del administrador. */
+function stop_impersonation(PDO $pdo): bool
+{
+    if (!is_impersonating()) {
+        return false;
+    }
+    $adminId = (int) $_SESSION['impersonator']['id'];
+    $teacherId = (int) ($_SESSION['user_id'] ?? 0);
+
+    $stmt = $pdo->prepare("SELECT id, name, email FROM users WHERE id = :id AND role = 'admin' AND is_active = 1");
+    $stmt->execute(['id' => $adminId]);
+    $admin = $stmt->fetch();
+    if (!$admin) {
+        do_logout();
+        return false;
+    }
+
+    session_regenerate_id(true);
+    unset($_SESSION['impersonator']);
+    $_SESSION['user_id']    = (int) $admin['id'];
+    $_SESSION['user_name']  = $admin['name'];
+    $_SESSION['user_email'] = $admin['email'];
+    $_SESSION['user_role']  = 'admin';
+    audit_log($pdo, $adminId, 'impersonate_stop', "El administrador salió del perfil del profesor #{$teacherId}");
+    return true;
+}
+
 /**
  * Exige que haya sesión iniciada. Si no, redirige a login.
  */
@@ -52,6 +128,29 @@ function require_login(): void
 {
     if (!is_logged_in()) {
         redirect('login.php');
+    }
+
+    // Cada 5 minutos se comprueba que la cuenta (la real, no la suplantada) siga activa: si un administrador
+    // la desactivó, se cierra la sesión.
+    if (time() - (int) ($_SESSION['active_checked_at'] ?? 0) > 300) {
+        $realId = (int) ($_SESSION['impersonator']['id'] ?? $_SESSION['user_id']);
+        try {
+            $stmt = Database::getConnection()->prepare('SELECT is_active FROM users WHERE id = :id');
+            $stmt->execute(['id' => $realId]);
+            $row = $stmt->fetch();
+            if (!$row || (int) $row['is_active'] !== 1) {
+                do_logout();
+                redirect('login.php');
+            }
+            $_SESSION['active_checked_at'] = time();
+        } catch (Throwable $e) {
+            error_log('require_login active check: ' . $e->getMessage());
+        }
+    }
+
+    // Contraseña temporal (cuenta nueva o restablecida por un administrador): hay que cambiarla antes de seguir.
+    if (!empty($_SESSION['must_change_password']) && basename($_SERVER['SCRIPT_NAME'] ?? '') !== 'change_password.php' && !is_impersonating()) {
+        redirect('change_password.php');
     }
 }
 
@@ -76,7 +175,7 @@ function require_role($roles): void
  */
 function attempt_login(PDO $pdo, string $email, string $password): bool
 {
-    $stmt = $pdo->prepare('SELECT id, name, email, password_hash, role, is_active FROM users WHERE email = :email LIMIT 1');
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE email = :email LIMIT 1');
     $stmt->execute(['email' => $email]);
     $user = $stmt->fetch();
 
@@ -95,6 +194,8 @@ function attempt_login(PDO $pdo, string $email, string $password): bool
     $_SESSION['user_name'] = $user['name'];
     $_SESSION['user_email']= $user['email'];
     $_SESSION['user_role'] = $user['role'];
+    $_SESSION['must_change_password'] = (int) ($user['must_change_password'] ?? 0) === 1;
+    $_SESSION['active_checked_at'] = time();
 
     return true;
 }

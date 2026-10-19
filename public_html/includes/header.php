@@ -37,7 +37,9 @@ $baseUrl = rtrim(APP_URL, '/');
             <?php if (is_logged_in()): ?>
                 <span class="nav-user">Hola, <?= e(current_user_name()) ?></span>
                 <a href="<?= e($baseUrl) ?>/<?= e(dashboard_url_for_role(current_role())) ?>">Panel</a>
-                <?php if (current_role() === 'teacher'): ?>
+                <?php if (current_role() === 'admin'): ?>
+                    <a href="<?= e($baseUrl) ?>/change_password.php">Mi contraseña</a>
+                <?php elseif (current_role() === 'teacher'): ?>
                     <a href="<?= e($baseUrl) ?>/teacher/profile.php">Mi perfil</a>
                 <?php elseif (current_role() === 'student'): ?>
                     <a href="<?= e($baseUrl) ?>/student/profile.php">Mi perfil</a>
@@ -50,4 +52,13 @@ $baseUrl = rtrim(APP_URL, '/');
         </nav>
     </div>
 </header>
+<?php if (function_exists('is_impersonating') && is_impersonating()): ?>
+<div class="no-print" style="background:#7C2D12; color:#fff; padding:8px 16px; display:flex; gap:12px; align-items:center; justify-content:center; flex-wrap:wrap; font-size:0.9rem; position:sticky; top:0; z-index:50;">
+    <span>👁️ Estás viendo el sistema como <strong><?= e(current_user_name()) ?></strong> (profesor). Todo lo que hagas se aplica a su cuenta y queda registrado.</span>
+    <form method="post" action="<?= e($baseUrl) ?>/stop_impersonation.php" style="margin:0;">
+        <?php csrf_field(); ?>
+        <button type="submit" style="background:#fff; color:#7C2D12; border:0; border-radius:6px; padding:5px 12px; font-weight:700; cursor:pointer;">↩ Volver a administrador</button>
+    </form>
+</div>
+<?php endif; ?>
 <main class="app-main">
