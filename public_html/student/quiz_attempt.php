@@ -13,17 +13,18 @@ $studentId = current_user_id();
 $assignmentId = (int) ($_GET['assignment_id'] ?? 0);
 
 $stmt = $pdo->prepare(
-    "SELECT a.id AS assignment_id, a.due_date, a.points AS assignment_points, a.quiz_id AS assignment_quiz_id,
+    "SELECT a.id AS assignment_id, COALESCE(ax.due_date, a.due_date) AS due_date, a.points AS assignment_points, a.quiz_id AS assignment_quiz_id,
         qz.id AS quiz_id, qz.title, qz.description, qz.description_format, qz.instructions,
         qz.time_limit_minutes, qz.max_attempts, qz.questions_per_attempt, qz.status
      FROM assignments a
      INNER JOIN quizzes qz ON qz.id = a.quiz_id
      INNER JOIN assignment_students ast ON ast.assignment_id = a.id AND ast.student_id = :student_id
+     LEFT JOIN assignment_extensions ax ON ax.assignment_id = a.id AND ax.student_id = :student_id2
      INNER JOIN subjects sj ON sj.id = a.subject_id
      INNER JOIN courses cc ON cc.id = sj.course_id AND cc.is_active = 1
      WHERE a.id = :assignment_id AND (a.start_date IS NULL OR a.start_date <= :now) LIMIT 1"
 );
-$stmt->execute(['assignment_id' => $assignmentId, 'student_id' => $studentId, 'now' => now_datetime()]);
+$stmt->execute(['assignment_id' => $assignmentId, 'student_id' => $studentId, 'student_id2' => $studentId, 'now' => now_datetime()]);
 $row = $stmt->fetch();
 
 if (!$row || $row['status'] !== 'published') {

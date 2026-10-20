@@ -14,7 +14,7 @@ $studentId = current_user_id();
 $assignmentId = (int) ($_GET['id'] ?? 0);
 
 $stmt = $pdo->prepare(
-    'SELECT a.*, act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, act.words_per_attempt, qz.id AS quiz_id, qz.title AS quiz_title,
+    'SELECT a.*, COALESCE(ax.due_date, a.due_date) AS due_date, ax.due_date AS ext_due_date, ax.note AS ext_note, act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, act.words_per_attempt, qz.id AS quiz_id, qz.title AS quiz_title,
         qz.time_limit_minutes, qz.max_attempts, s.name AS subject_name,
         c.is_active AS course_active, sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id, sub.returned_at, sub.return_note
      FROM assignments a
@@ -23,9 +23,10 @@ $stmt = $pdo->prepare(
      INNER JOIN subjects s ON s.id = a.subject_id
      INNER JOIN courses c ON c.id = s.course_id
      INNER JOIN submissions sub ON sub.assignment_id = a.id AND sub.student_id = :student_id
+     LEFT JOIN assignment_extensions ax ON ax.assignment_id = a.id AND ax.student_id = :student_id2
      WHERE a.id = :id LIMIT 1'
 );
-$stmt->execute(['id' => $assignmentId, 'student_id' => $studentId]);
+$stmt->execute(['id' => $assignmentId, 'student_id' => $studentId, 'student_id2' => $studentId]);
 $assignment = $stmt->fetch();
 
 if (!$assignment) {
@@ -110,6 +111,7 @@ require __DIR__ . '/../includes/header.php';
     <?= (int) $assignment['points'] ?> pts
     <?php if ($assignment['due_date']): ?>
         · Entrega: <?= e(dt_format($assignment['due_date'])) ?>
+        <?= !empty($assignment['ext_due_date']) ? ' <span style="display:inline-block; padding:1px 8px; border-radius:999px; font-size:0.75rem; font-weight:700; background:#E8F3FF; color:#0658C2; border:1px solid #BFDBFE;" title="Tu profesor te dio más tiempo">⏰ prórroga</span>' : '' ?>
         <?= ($isOverdue && $assignment['status'] !== 'completed') ? ' <span style="color:var(--color-danger); font-weight:700;">(vencida)</span>' : '' ?>
     <?php endif; ?>
 </p>

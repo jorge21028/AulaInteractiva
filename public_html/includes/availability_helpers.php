@@ -130,14 +130,15 @@ function assignment_lock_reason(PDO $pdo, ?int $assignmentId, int $studentId): ?
     }
 
     $stmt = $pdo->prepare(
-        'SELECT a.start_date, a.due_date, c.is_active, sub.status AS sub_status, sub.returned_at
+        'SELECT a.start_date, COALESCE(ax.due_date, a.due_date) AS due_date, c.is_active, sub.status AS sub_status, sub.returned_at
          FROM assignments a
          INNER JOIN subjects s ON s.id = a.subject_id
          INNER JOIN courses c ON c.id = s.course_id
          LEFT JOIN submissions sub ON sub.assignment_id = a.id AND sub.student_id = :sid
+         LEFT JOIN assignment_extensions ax ON ax.assignment_id = a.id AND ax.student_id = :sid2
          WHERE a.id = :aid LIMIT 1'
     );
-    $stmt->execute(['aid' => $assignmentId, 'sid' => $studentId]);
+    $stmt->execute(['aid' => $assignmentId, 'sid' => $studentId, 'sid2' => $studentId]);
     $row = $stmt->fetch();
 
     if (!$row) {
@@ -166,7 +167,7 @@ function assignment_lock_reason(PDO $pdo, ?int $assignmentId, int $studentId): ?
 function courses_for_teacher(PDO $pdo, int $teacherId, bool $active): array
 {
     $stmt = $pdo->prepare(
-        'SELECT c.id, c.name, c.is_active, c.deactivated_at,
+        'SELECT c.id, c.name, c.is_active, c.deactivated_at, c.school_year,
             (SELECT COUNT(*) FROM subjects s WHERE s.course_id = c.id) AS subjects_count,
             (SELECT COUNT(DISTINCT cs.student_id) FROM course_students cs WHERE cs.course_id = c.id) AS students_count
          FROM courses c
@@ -206,4 +207,63 @@ function course_set_active(PDO $pdo, int $courseId, int $teacherId, bool $active
             'id'     => $courseId,
         ]);
     return true;
+}
+
+
+// ---------------------------------------------------------------------------
+// Prórroga individual (fecha de entrega especial para un estudiante)
+// ---------------------------------------------------------------------------
+
+/** Estudiantes de una asignación con su prórroga (si tienen) y su estado de entrega. */
+function extensions_for_assignment(PDO $pdo, int $assignmentId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT u.id AS student_id, u.name, u.email, sub.status, sub.returned_at, ax.due_date AS ext_due_date, ax.note AS ext_note
+         FROM submissions sub
+         INNER JOIN users u ON u.id = sub.student_id
+         LEFT JOIN assignment_extensions ax ON ax.assignment_id = sub.assignment_id AND ax.student_id = sub.student_id
+         WHERE sub.assignment_id = :aid
+         ORDER BY u.name ASC'
+    );
+    $stmt->execute(['aid' => $assignmentId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Da una prórroga (nueva fecha de entrega) a los estudiantes indicados. Solo estudiantes que tienen esa asignación.
+ * Devuelve cuántos se actualizaron.
+ */
+function extension_set(PDO $pdo, int $assignmentId, array $studentIds, string $dueDate, ?string $note, int $byUserId): int
+{
+    $studentIds = array_values(array_unique(array_filter(array_map('intval', $studentIds))));
+    if (empty($studentIds)) {
+        return 0;
+    }
+    $in = implode(',', array_fill(0, count($studentIds), '?'));
+    $valid = $pdo->prepare("SELECT student_id FROM submissions WHERE assignment_id = ? AND student_id IN ($in)");
+    $valid->execute(array_merge([$assignmentId], $studentIds));
+    $ids = array_map('intval', array_column($valid->fetchAll(), 'student_id'));
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO assignment_extensions (assignment_id, student_id, due_date, note, created_by, created_at)
+         VALUES (:aid, :sid, :due, :note, :by, :now)
+         ON DUPLICATE KEY UPDATE due_date = VALUES(due_date), note = VALUES(note), created_by = VALUES(created_by), created_at = VALUES(created_at)'
+    );
+    foreach ($ids as $sid) {
+        $stmt->execute(['aid' => $assignmentId, 'sid' => $sid, 'due' => $dueDate, 'note' => $note !== '' ? $note : null, 'by' => $byUserId, 'now' => now_datetime()]);
+    }
+    return count($ids);
+}
+
+/** Quita la prórroga a los estudiantes indicados (vuelven a la fecha general). */
+function extension_clear(PDO $pdo, int $assignmentId, array $studentIds): int
+{
+    $studentIds = array_values(array_unique(array_filter(array_map('intval', $studentIds))));
+    if (empty($studentIds)) {
+        return 0;
+    }
+    $in = implode(',', array_fill(0, count($studentIds), '?'));
+    $stmt = $pdo->prepare("DELETE FROM assignment_extensions WHERE assignment_id = ? AND student_id IN ($in)");
+    $stmt->execute(array_merge([$assignmentId], $studentIds));
+    return $stmt->rowCount();
 }

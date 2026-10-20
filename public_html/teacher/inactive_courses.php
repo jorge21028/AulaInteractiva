@@ -42,6 +42,7 @@ require __DIR__ . '/../includes/header.php';
 ?>
 <link rel="stylesheet" href="<?= e(rtrim(APP_URL, '/')) ?>/assets/css/spaces.css">
 <nav class="crumbs" aria-label="Ruta"><a href="dashboard.php">Mis cursos</a><span class="sep">›</span><strong>Cursos inactivos</strong></nav>
+<p style="margin:0 0 8px;"><a href="school_year.php">🗓️ Reabrir o cerrar un año escolar completo</a></p>
 <h1>📦 Cursos inactivos</h1>
 <p class="space-sub" style="margin-top:-6px;">
     Estos cursos ya no aparecen a los estudiantes. Tú conservas todo y puedes reactivarlos o importar su contenido a otro curso.
@@ -69,7 +70,7 @@ require __DIR__ . '/../includes/header.php';
                 </div>
                 <div class="space-body">
                     <h3><?= e($course['name']) ?></h3>
-                    <p class="space-meta">
+                    <p class="space-meta"><?= !empty($course['school_year']) ? '🗓️ ' . e($course['school_year']) . ' · ' : '' ?>
                         <?= (int) $course['subjects_count'] ?> asignatura<?= (int) $course['subjects_count'] === 1 ? '' : 's' ?> ·
                         <?= (int) $course['students_count'] ?> estudiante<?= (int) $course['students_count'] === 1 ? '' : 's' ?> ·
                         <?= (int) $cs['assignments'] ?> asignación(es)

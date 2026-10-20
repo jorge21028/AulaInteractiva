@@ -28,19 +28,20 @@ require_once __DIR__ . '/game_helpers.php'; // carga también word_games_helpers
 function wga_load_assignment(PDO $pdo, int $assignmentId, int $studentId): ?array
 {
     $stmt = $pdo->prepare(
-        "SELECT a.id, a.title, a.description, a.points, a.due_date, a.subject_id,
+        "SELECT a.id, a.title, a.description, a.points, COALESCE(ax.due_date, a.due_date) AS due_date, a.subject_id,
                 act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, act.words_per_attempt, act.status AS activity_status,
                 sub.id AS submission_id, sub.status AS sub_status, sub.score AS sub_score, sub.feedback, sub.reviewed_at
          FROM assignments a
          INNER JOIN activities act ON act.id = a.activity_id
          INNER JOIN submissions sub ON sub.assignment_id = a.id AND sub.student_id = :student_id
+         LEFT JOIN assignment_extensions ax ON ax.assignment_id = a.id AND ax.student_id = :student_id2
          INNER JOIN subjects sj ON sj.id = a.subject_id
          INNER JOIN courses cc ON cc.id = sj.course_id AND cc.is_active = 1
          WHERE a.id = :id AND act.game_mode IN ('ahorcado', 'crucigrama', 'sopa_letras', 'emparejar')
            AND (a.start_date IS NULL OR a.start_date <= :now)
          LIMIT 1"
     );
-    $stmt->execute(['id' => $assignmentId, 'student_id' => $studentId, 'now' => now_datetime()]);
+    $stmt->execute(['id' => $assignmentId, 'student_id' => $studentId, 'student_id2' => $studentId, 'now' => now_datetime()]);
     $row = $stmt->fetch();
     return $row ?: null;
 }

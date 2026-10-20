@@ -4,6 +4,7 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/space_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
+require_once __DIR__ . '/../includes/schoolyear_helpers.php';
 
 require_role('teacher');
 
@@ -16,14 +17,15 @@ $errors = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_course') {
     csrf_verify($_POST['csrf_token'] ?? null);
     $name = clean_string($_POST['course_name'] ?? '');
+    $schoolYear = school_year_normalize($_POST['school_year'] ?? '') ?? school_year_current();
 
     if ($name === '') {
         $errors[] = 'El nombre del curso no puede estar vacío.';
     } else {
         $stmt = $pdo->prepare(
-            'INSERT INTO courses (name, created_at) VALUES (:name, :created_at)'
+            'INSERT INTO courses (name, school_year, created_at) VALUES (:name, :school_year, :created_at)'
         );
-        $stmt->execute(['name' => $name, 'created_at' => now_datetime()]);
+        $stmt->execute(['name' => $name, 'school_year' => $schoolYear, 'created_at' => now_datetime()]);
         $courseId = (int) $pdo->lastInsertId();
 
         $pdo->prepare('INSERT INTO teacher_courses (teacher_id, course_id) VALUES (:teacher_id, :course_id)')
@@ -36,7 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
 
 // ---- Cursos del profesor ----
 $stmt = $pdo->prepare(
-    'SELECT c.id, c.name,
+    'SELECT c.id, c.name, c.school_year,
         (SELECT COUNT(*) FROM subjects s WHERE s.course_id = c.id) AS subjects_count,
         (SELECT COUNT(DISTINCT cs.student_id) FROM course_students cs WHERE cs.course_id = c.id) AS students_count
      FROM courses c
@@ -95,7 +97,9 @@ require __DIR__ . '/../includes/header.php';
     <?php if (!empty($_GET['reactivated'])): ?>
         <div class="alert alert-success">Curso reactivado: los estudiantes vuelven a verlo.</div>
     <?php endif; ?>
-    <p style="margin:0 0 8px;"><a class="btn btn-secondary" style="margin:0; padding:6px 14px; font-size:0.85rem;" href="inactive_courses.php">📦 Cursos inactivos (<?= (int) $inactiveCount ?>)</a></p>
+    <p style="margin:0 0 8px;"><a class="btn btn-secondary" style="margin:0; padding:6px 14px; font-size:0.85rem;" href="inactive_courses.php">📦 Cursos inactivos (<?= (int) $inactiveCount ?>)</a>
+        <a class="btn btn-secondary" style="margin:0 0 0 6px; padding:6px 14px; font-size:0.85rem;" href="school_year.php">🗓️ Año escolar</a>
+        <a class="btn btn-secondary" style="margin:0 0 0 6px; padding:6px 14px; font-size:0.85rem;" href="calendar.php">📅 Calendario</a></p>
     <p class="text-muted" style="margin-top:0;">Entra a un curso para ver sus asignaturas y el estado de cada asignación.</p>
 
     <?php foreach ($errors as $error): ?>
@@ -116,7 +120,7 @@ require __DIR__ . '/../includes/header.php';
                 </div>
                 <div class="space-body">
                     <h3><?= e($course['name']) ?></h3>
-                    <p class="space-meta">
+                    <p class="space-meta"><?= !empty($course['school_year']) ? '🗓️ ' . e($course['school_year']) . ' · ' : '' ?>
                         <?= (int) $course['subjects_count'] ?> asignatura<?= (int) $course['subjects_count'] === 1 ? '' : 's' ?> ·
                         <?= (int) $course['students_count'] ?> estudiante<?= (int) $course['students_count'] === 1 ? '' : 's' ?> ·
                         <?= (int) $cs['assignments'] ?> <?= (int) $cs['assignments'] === 1 ? 'asignación' : 'asignaciones' ?>
@@ -133,6 +137,8 @@ require __DIR__ . '/../includes/header.php';
                 <input type="hidden" name="action" value="create_course">
                 <label for="course_name">Nombre del curso</label>
                 <input type="text" id="course_name" name="course_name" placeholder="Ej: 4to A" required>
+                <label for="school_year">Año escolar</label>
+                <input type="text" id="school_year" name="school_year" value="<?= e(school_year_current()) ?>" pattern="\d{4}\s*[-/]\s*\d{4}" title="Ejemplo: 2026-2027">
                 <button type="submit" class="btn">Crear curso</button>
             </form>
         </details>

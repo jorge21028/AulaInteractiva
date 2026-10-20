@@ -33,15 +33,16 @@ if (!empty($courses)) {
 
 // Todas las asignaciones de este estudiante, con su asignatura
 $allStmt = $pdo->prepare(
-    "SELECT a.id, a.title, a.start_date, a.due_date, a.points, a.subject_id, sub.status, sub.returned_at
+    "SELECT a.id, a.title, a.start_date, COALESCE(ax.due_date, a.due_date) AS due_date, a.points, a.subject_id, sub.status, sub.returned_at
      FROM submissions sub
      INNER JOIN assignments a ON a.id = sub.assignment_id
+     LEFT JOIN assignment_extensions ax ON ax.assignment_id = a.id AND ax.student_id = :student_id2
      WHERE sub.student_id = :student_id
        AND (a.start_date IS NULL OR a.start_date <= :now)
-     ORDER BY a.due_date IS NULL, a.due_date ASC, a.title ASC"
+     ORDER BY COALESCE(ax.due_date, a.due_date) IS NULL, COALESCE(ax.due_date, a.due_date) ASC, a.title ASC"
 );
 // Las asignaciones cuya fecha/hora de inicio aún no llega NO aparecen (solo las ve el profesor).
-$allStmt->execute(['student_id' => $studentId, 'now' => now_datetime()]);
+$allStmt->execute(['student_id' => $studentId, 'student_id2' => $studentId, 'now' => now_datetime()]);
 
 // Agrupadas por asignatura y estado, listas para renderizar sin más consultas
 $assignmentsBySubject = [];
@@ -83,6 +84,8 @@ require __DIR__ . '/../includes/header.php';
 <p>
     <a class="btn" href="<?= e(rtrim(APP_URL, '/')) ?>/game/join.php">Unirse a un juego con un código</a>
     <a class="btn btn-secondary" href="<?= e(rtrim(APP_URL, '/')) ?>/student/join_course.php">Unirme a una asignatura</a>
+    <a class="btn btn-secondary" href="<?= e(rtrim(APP_URL, '/')) ?>/student/calendar.php">📅 Mi calendario</a>
+    <a class="btn btn-secondary" href="<?= e(rtrim(APP_URL, '/')) ?>/student/progress.php">📈 Mi progreso</a>
 </p>
 
 <h2 style="margin-top:24px;">Mis asignaturas</h2>

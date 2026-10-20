@@ -5,6 +5,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/course_helpers.php';
 require_once __DIR__ . '/../includes/space_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
+require_once __DIR__ . '/../includes/schoolyear_helpers.php';
 
 require_role('teacher');
 
@@ -14,7 +15,7 @@ $courseId = (int) ($_GET['id'] ?? 0);
 
 // Verificar que el curso pertenece a este profesor
 $stmt = $pdo->prepare(
-    'SELECT c.id, c.name, c.enrollment_code, c.is_active, c.deactivated_at FROM courses c
+    'SELECT c.id, c.name, c.enrollment_code, c.is_active, c.deactivated_at, c.school_year FROM courses c
      INNER JOIN teacher_courses tc ON tc.course_id = c.id
      WHERE c.id = :course_id AND tc.teacher_id = :teacher_id LIMIT 1'
 );
@@ -66,6 +67,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         course_set_active($pdo, $courseId, $teacherId, true);
         audit_log($pdo, $teacherId, 'activate_course', "Curso #{$courseId} reactivado");
         redirect('teacher/dashboard.php?reactivated=1');
+    }
+
+    if ($action === 'set_school_year') {
+        $year = school_year_normalize($_POST['school_year'] ?? '');
+        if ($year === null) {
+            $errors[] = 'Escribe el año escolar así: 2026-2027 (el segundo año debe ser el siguiente).';
+        } else {
+            $pdo->prepare('UPDATE courses SET school_year = :y WHERE id = :id')->execute(['y' => $year, 'id' => $courseId]);
+            $course['school_year'] = $year;
+            audit_log($pdo, $teacherId, 'set_school_year', "Curso #{$courseId}: año escolar {$year}");
+            $notice = 'Año escolar actualizado.';
+        }
     }
 
     if ($action === 'rename_course') {
@@ -378,6 +391,17 @@ $self = 'course.php?id=' . (int) $courseId;
                 <button type="submit" class="btn" style="margin:0;">✅ Reactivar curso</button>
             </form>
         <?php endif; ?>
+    </section>
+
+    <section class="card" style="margin-top:16px;">
+        <h2 style="margin-top:0;">Año escolar</h2>
+        <form method="post" action="<?= e($self) ?>&tab=settings" class="form-narrow" style="margin:0;">
+            <?php csrf_field(); ?>
+            <input type="hidden" name="action" value="set_school_year">
+            <input type="text" name="school_year" value="<?= e((string) ($course['school_year'] ?? school_year_current())) ?>" pattern="\d{4}\s*[-/]\s*\d{4}" title="Ejemplo: 2026-2027">
+            <button type="submit" class="btn btn-secondary">Guardar año escolar</button>
+            <p class="text-muted" style="font-size:0.85rem; margin:6px 0 0;">Sirve para cerrar todos los cursos de un año de una vez desde <a href="school_year.php">Año escolar</a>.</p>
+        </form>
     </section>
 
     <section class="card" style="margin-top:16px;">

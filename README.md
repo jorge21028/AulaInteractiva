@@ -229,3 +229,10 @@ Posibles ampliaciones futuras: fichas de estudio, preguntas con audio/video como
 - `admin/images.php` (menú **🖼️ Imágenes**) agrupa: `admin/optimize_images.php`, `admin/delete_images.php` (ahora con alcance **global**: asignaciones de todos los profesores, mostrando el profesor) y `admin/diagnose_images.php`. Todas exigen el rol `admin`.
 - `teacher/optimize_images.php`, `teacher/delete_images.php` y `teacher/diagnose_images.php` quedan como archivos que solo redirigen al panel (así ninguna copia o enlace antiguo da acceso a un profesor). Se quitaron sus botones del panel del profesor y de la pantalla de la asignación.
 - `delete_images_overview()` y `delete_assignment_images()` aceptan `$teacherId = null` (alcance de administrador).
+
+## Fase 19 — Prórroga por estudiante, calendario, progreso del estudiante y año escolar
+
+- **Prórroga individual**: tabla `assignment_extensions` (`database/schema_fase19.sql`). La fecha efectiva de un estudiante es `COALESCE(ax.due_date, a.due_date)` en todas las consultas del lado estudiante (panel, asignación, cuestionarios, juegos de palabras, bloqueo de editores/API de proyectos: `assignment_lock_reason`). Pantalla del profesor: `teacher/assignment_extensions.php` (dar/quitar a varios a la vez, con motivo). Funciones en `includes/availability_helpers.php`.
+- **Calendario**: `includes/calendar_helpers.php`, `student/calendar.php` (mes + línea de tiempo; respeta asignaciones ocultas, cursos inactivos y la prórroga) y `teacher/calendar.php` (entregas con avance y publicaciones programadas).
+- **Mi progreso**: `includes/progress_helpers.php` + `student/progress.php` (promedio ponderado por puntos, entregas a tiempo, pendientes/vencidas, gráfico SVG de evolución, por asignatura y últimas notas).
+- **Año escolar**: columna `courses.school_year` (el año empieza en agosto). `includes/schoolyear_helpers.php`, `teacher/school_year.php` (cerrar/reabrir todos los cursos de un año), edición en Ajustes del curso y cierre/reapertura global en `admin/courses.php`.

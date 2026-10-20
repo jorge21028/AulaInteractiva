@@ -81,7 +81,7 @@ function admin_teachers(PDO $pdo): array
 function admin_courses(PDO $pdo): array
 {
     return $pdo->query(
-        "SELECT c.id, c.name, c.is_active, c.enrollment_code,
+        "SELECT c.id, c.name, c.is_active, c.enrollment_code, c.school_year,
             (SELECT GROUP_CONCAT(CONCAT(u.id, ':', u.name) SEPARATOR '||') FROM teacher_courses tc INNER JOIN users u ON u.id = tc.teacher_id WHERE tc.course_id = c.id) AS teachers,
             (SELECT COUNT(*) FROM subjects s WHERE s.course_id = c.id) AS subjects_count,
             (SELECT COUNT(*) FROM course_students cs WHERE cs.course_id = c.id) AS students_count,
