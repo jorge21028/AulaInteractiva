@@ -5,6 +5,7 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/admin_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
+require_once __DIR__ . '/../includes/backup_helpers.php';
 
 admin_require();
 $pdo = Database::getConnection();
@@ -33,6 +34,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $stats = admin_stats($pdo);
+$lastBackup = backup_last_time($pdo);
+$backupDays = $lastBackup ? (int) floor((time() - strtotime($lastBackup)) / 86400) : null;
 $teachers = admin_teachers($pdo);
 
 $pageTitle = 'Súper administrador';
@@ -49,6 +52,13 @@ require __DIR__ . '/../includes/header.php';
         🔑 Contraseña temporal para <strong><?= e($tempFor) ?></strong>:
         <code style="font-size:1.1rem; user-select:all;"><?= e($tempPassword) ?></code><br>
         <span style="font-size:0.85rem;">Cópiala ahora: no se vuelve a mostrar. La persona tendrá que cambiarla al iniciar sesión.</span>
+    </div>
+<?php endif; ?>
+
+<?php if ($backupDays === null || $backupDays > 7): ?>
+    <div class="alert" style="background:#FFF7ED; border:1px solid #FED7AA; color:#9A3412;">
+        💾 <?= $backupDays === null ? 'Todavía no has hecho ninguna copia de seguridad.' : 'Tu última copia de seguridad fue hace ' . $backupDays . ' días.' ?>
+        <a href="backup.php">Hacer una copia ahora</a>
     </div>
 <?php endif; ?>
 

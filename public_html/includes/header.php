@@ -25,6 +25,9 @@ $baseUrl = rtrim(APP_URL, '/');
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
 <link rel="stylesheet" href="<?= e($baseUrl) ?>/assets/css/style.css">
+<?php if (is_logged_in() && current_role() === 'student'): ?>
+<link rel="stylesheet" href="<?= e($baseUrl) ?>/assets/css/notifications.css">
+<?php endif; ?>
 </head>
 <body>
 <header class="topbar no-print">
@@ -35,6 +38,17 @@ $baseUrl = rtrim(APP_URL, '/');
         </a>
         <nav class="topnav">
             <?php if (is_logged_in()): ?>
+                <?php if (current_role() === 'student'):
+                    require_once __DIR__ . '/notification_helpers.php';
+                    $notifPdo = Database::getConnection();
+                    notifications_sync_student($notifPdo, (int) current_user_id());
+                    $notifUnread = notifications_unread_count($notifPdo, (int) current_user_id());
+                ?>
+                    <span class="notif-wrap" id="notif-wrap">
+                        <button type="button" class="notif-btn" aria-label="Notificaciones" title="Notificaciones">🔔<span class="notif-badge<?= $notifUnread > 0 ? ' on' : '' ?>"><?= $notifUnread > 99 ? '99+' : (int) $notifUnread ?></span></button>
+                        <div class="notif-panel" role="dialog" aria-label="Notificaciones"></div>
+                    </span>
+                <?php endif; ?>
                 <span class="nav-user">Hola, <?= e(current_user_name()) ?></span>
                 <a href="<?= e($baseUrl) ?>/<?= e(dashboard_url_for_role(current_role())) ?>">Panel</a>
                 <?php if (current_role() === 'admin'): ?>
@@ -52,6 +66,10 @@ $baseUrl = rtrim(APP_URL, '/');
         </nav>
     </div>
 </header>
+<?php if (is_logged_in() && current_role() === 'student'): ?>
+<script src="<?= e($baseUrl) ?>/assets/js/notifications.js"></script>
+<script>AulaNotif.init({ listUrl: <?= json_encode($baseUrl . '/api/notifications/list.php') ?>, readUrl: <?= json_encode($baseUrl . '/api/notifications/read.php') ?>, allUrl: <?= json_encode($baseUrl . '/student/notifications.php') ?>, csrf: <?= json_encode(csrf_token()) ?> });</script>
+<?php endif; ?>
 <?php if (function_exists('is_impersonating') && is_impersonating()): ?>
 <div class="no-print" style="background:#7C2D12; color:#fff; padding:8px 16px; display:flex; gap:12px; align-items:center; justify-content:center; flex-wrap:wrap; font-size:0.9rem; position:sticky; top:0; z-index:50;">
     <span>👁️ Estás viendo el sistema como <strong><?= e(current_user_name()) ?></strong> (profesor). Todo lo que hagas se aplica a su cuenta y queda registrado.</span>

@@ -27,6 +27,10 @@ require __DIR__ . '/../includes/header.php';
         <h3 style="margin-top:0;">🗑️ Borrar imágenes de trabajos</h3>
         <p class="text-muted" style="margin-bottom:0;">Elimina las imágenes que los estudiantes subieron en las asignaciones que elijas (de cualquier profesor).</p>
     </a>
+    <a class="card" href="orphan_images.php" style="display:block; text-decoration:none; color:inherit;">
+        <h3 style="margin-top:0;">🧹 Imágenes huérfanas</h3>
+        <p class="text-muted" style="margin-bottom:0;">Detecta y borra las imágenes que ya no usa ningún trabajo, pregunta ni aviso, para liberar espacio.</p>
+    </a>
     <a class="card" href="diagnose_images.php" style="display:block; text-decoration:none; color:inherit;">
         <h3 style="margin-top:0;">🔧 Diagnóstico de imágenes</h3>
         <p class="text-muted" style="margin-bottom:0;">Si las imágenes se suben pero no se ven: prueba el servidor y repara permisos o <code>.htaccess</code>.</p>

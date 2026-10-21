@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
+require_once __DIR__ . '/../includes/announcement_helpers.php';
 
 require_role('student');
 
@@ -76,6 +77,8 @@ if (!empty($courses)) {
     }
 }
 
+$announcements = announcements_for_student($pdo, (int) $studentId, 4, 21);
+
 $pageTitle = 'Panel del estudiante';
 require __DIR__ . '/../includes/header.php';
 ?>
@@ -87,6 +90,20 @@ require __DIR__ . '/../includes/header.php';
     <a class="btn btn-secondary" href="<?= e(rtrim(APP_URL, '/')) ?>/student/calendar.php">📅 Mi calendario</a>
     <a class="btn btn-secondary" href="<?= e(rtrim(APP_URL, '/')) ?>/student/progress.php">📈 Mi progreso</a>
 </p>
+
+<?php if (!empty($announcements)): ?>
+    <section class="card" style="margin-top:16px; border-left:4px solid #F59E0B; background:#FFFBEB;">
+        <h2 style="margin:0 0 8px;">📢 Avisos</h2>
+        <?php foreach ($announcements as $an): ?>
+            <div style="padding:8px 0; border-top:1px solid #FDE68A;">
+                <strong><?= (int) $an['is_pinned'] === 1 ? '📌 ' : '' ?><?= e($an['title']) ?></strong>
+                <span class="text-muted" style="font-size:0.8rem;"> · <?= e($an['course_name']) ?> · <?= e(dt_format($an['publish_at'])) ?></span>
+                <div style="margin-top:4px;"><?= render_description($an['body'], $an['body_format']) ?></div>
+            </div>
+        <?php endforeach; ?>
+        <p style="margin:8px 0 0;"><a href="<?= e(rtrim(APP_URL, '/')) ?>/student/announcements.php">Ver todos los avisos</a></p>
+    </section>
+<?php endif; ?>
 
 <h2 style="margin-top:24px;">Mis asignaturas</h2>
 

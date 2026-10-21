@@ -223,7 +223,8 @@ $self = 'course.php?id=' . (int) $courseId;
 <div class="space-head">
     <div>
         <h1><?= e($course['name']) ?></h1>
-        <p class="space-sub">Código de matrícula: <strong style="letter-spacing:2px;"><?= e($course['enrollment_code']) ?></strong></p>
+        <p class="space-sub">Código de matrícula: <strong style="letter-spacing:2px;"><?= e($course['enrollment_code']) ?></strong>
+            · <a href="announcements.php?course=<?= (int) $courseId ?>">📢 Avisos de este curso</a></p>
     </div>
     <a class="btn btn-secondary" href="assignments.php">➕ Nueva asignación</a>
 </div>
