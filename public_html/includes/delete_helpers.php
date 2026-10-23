@@ -364,7 +364,7 @@ function delete_quiz_attempts(PDO $pdo, string $column, array $ids): void
 function delete_assignments_core(PDO $pdo, array $assignmentIds): array
 {
     $assignmentIds = array_values(array_filter(array_map('intval', $assignmentIds)));
-    $leftovers = ['image_names' => [], 'media' => []];
+    $leftovers = ['image_names' => [], 'media' => [], 'submission_files' => []];
     if (empty($assignmentIds)) {
         return $leftovers;
     }
@@ -390,6 +390,10 @@ function delete_assignments_core(PDO $pdo, array $assignmentIds): array
             }
         }
         $pdo->exec("DELETE FROM uploads WHERE project_id IN ($pin)");
+
+        // Entrega de archivos (PDF, Word, Excel...): se quitan las filas y luego se borran del disco
+        require_once __DIR__ . '/project_files_helpers.php';
+        $leftovers['submission_files'] = project_files_detach_for_projects($pdo, $projectIds);
     }
 
     delete_quiz_attempts($pdo, 'assignment_id', $assignmentIds);
@@ -406,6 +410,10 @@ function delete_assignments_core(PDO $pdo, array $assignmentIds): array
 function delete_finish_files(PDO $pdo, array $leftovers): array
 {
     delete_media_files($leftovers['media'] ?? []);
+    if (!empty($leftovers['submission_files'])) {
+        require_once __DIR__ . '/project_files_helpers.php';
+        project_files_remove_disk($leftovers['submission_files']);
+    }
     return delete_unused_image_files($pdo, $leftovers['image_names'] ?? []);
 }
 

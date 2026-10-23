@@ -91,6 +91,7 @@ $editorUrlByType = [
     'mapa_mental' => 'canvas.php',
     'presentacion' => 'presentacion.php',
     'imagenes' => 'imagenes.php',
+    'archivos' => 'archivos.php',
 ];
 
 $pageTitle = $assignment['title'];

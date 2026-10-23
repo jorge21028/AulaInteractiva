@@ -139,6 +139,7 @@ require __DIR__ . '/../includes/header.php';
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/image_upload.js"></script>
+<script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/draft_guard.js"></script>
 <script>
 const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;
 const PROJECT_ID = <?= (int) $project['id'] ?>;
@@ -355,32 +356,30 @@ if (!IS_SUBMITTED) {
         renderSlideList();
     });
 
-    async function saveDraft(silent) {
-        captureCurrentSlide();
-        const statusEl = document.getElementById('save-status');
-        if (!silent) statusEl.textContent = 'Guardando...';
-        try {
-            const res = await fetch(`${AULA_APP_URL}/api/projects/save.php`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    project_id: PROJECT_ID,
-                    title: document.getElementById('title_input').value,
-                    data: { slides },
-                    csrf_token: CSRF_TOKEN,
-                }),
-            });
-            const data = await res.json();
-            statusEl.textContent = data.success ? 'Guardado ' + new Date().toLocaleTimeString() : (data.message || 'No se pudo guardar');
-        } catch (e) {
-            statusEl.textContent = 'No se pudo guardar (revisa tu conexión).';
-        }
-    }
+    AulaDraft.init({
+        appUrl: AULA_APP_URL, projectId: PROJECT_ID, csrf: CSRF_TOKEN, userKey: <?= (int) $studentId ?>, version: <?= json_encode($project['updated_at']) ?>,
+        statusEl: document.getElementById('save-status'),
+        getState: () => {
+            if (isRestoring) return null;   // una diapositiva está cargando: nunca guardarla vacía por error
+            captureCurrentSlide();
+            return { title: document.getElementById('title_input').value, data: { slides } };
+        },
+        applyState: (st) => {
+            if (st.title !== undefined) document.getElementById('title_input').value = st.title;
+            if (st.data && Array.isArray(st.data.slides) && st.data.slides.length) {
+                slides = st.data.slides;
+                currentSlide = Math.min(currentSlide, slides.length - 1);
+                loadSlideIntoCanvas(currentSlide);
+                renderSlideList();
+            }
+        },
+    });
+    const saveDraft = (silent) => AulaDraft.saveNow(silent);
 
     document.getElementById('btn-save').addEventListener('click', () => saveDraft(false));
     document.getElementById('btn-submit').addEventListener('click', async () => {
         if (!confirm('Una vez enviada, no podrás modificarla. ¿Entregar ahora?')) return;
-        await saveDraft(true);
+        if (!(await saveDraft(true))) { alert('No se pudo guardar tu trabajo. Revisa tu conexión e intenta de nuevo.'); return; }
         const res = await fetch(`${AULA_APP_URL}/api/projects/submit.php`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -388,13 +387,13 @@ if (!IS_SUBMITTED) {
         });
         const data = await res.json();
         if (data.success) {
+            AulaDraft.clearLocal();
             window.location.href = `${AULA_APP_URL}/student/assignment.php?id=${ASSIGNMENT_ID}`;
         } else {
             alert(data.message || 'No se pudo entregar el trabajo.');
         }
     });
 
-    setInterval(() => saveDraft(true), 20000);
 }
 
 // ---- Modo presentación (pantalla completa) ----

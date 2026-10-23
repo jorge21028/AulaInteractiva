@@ -37,10 +37,11 @@ if ($lockRow) {
     }
 }
 
-$ok = project_save($pdo, $projectId, current_user_id(), $data, $title);
+$savedAt = null;
+$ok = project_save($pdo, $projectId, current_user_id(), $data, $title, $savedAt);
 
 if (!$ok) {
     json_response(['success' => false, 'message' => 'No se pudo guardar (¿ya fue entregado?).'], 400);
 }
 
-json_response(['success' => true, 'saved_at' => now_datetime()]);
+json_response(['success' => true, 'saved_at' => $savedAt, 'version' => $savedAt]);

@@ -23,6 +23,7 @@ const PROJECT_TYPES = [
     'mapa_mental' => 'Mapa mental',
     'presentacion' => 'Presentación',
     'imagenes' => 'Entrega de imágenes (fotos)',
+    'archivos' => 'Entrega de archivos (PDF, Word, Excel...)',
 ];
 
 /** Máximo de imágenes por entrega de tipo "imagenes". */
@@ -71,6 +72,7 @@ function project_default_data(string $type): array
             ],
         ],
         'imagenes' => ['images' => []],
+        'archivos' => ['note' => ''],
         default => [],
     };
 }
@@ -80,8 +82,14 @@ function project_default_data(string $type): array
  * Se compara con la estructura inicial de cada tipo. IMPORTANTE: no se usa la hora de la última edición
  * porque los editores autoguardan cada 20 s aunque el estudiante no haya escrito nada.
  */
-function project_has_content(string $type, ?string $dataJson): bool
+function project_has_content(string $type, ?string $dataJson, int $fileCount = 0): bool
 {
+    // Entrega de archivos: lo que cuenta son los archivos subidos (viven en project_files, no en data_json).
+    if ($type === 'archivos') {
+        $note = is_array($d = json_decode((string) $dataJson, true)) ? trim((string) ($d['note'] ?? '')) : '';
+        return $fileCount > 0 || $note !== '';
+    }
+
     $data = json_decode((string) $dataJson, true);
     if (!is_array($data)) {
         return false;
@@ -157,6 +165,11 @@ function project_sanitize_data(array $data, string $type = '', int $studentId = 
 
     if ($type === 'imagenes') {
         $data = project_sanitize_images_data($data);
+    }
+
+    if ($type === 'archivos') {
+        // Solo se guarda el comentario opcional para el profesor; los archivos viven en project_files.
+        $data = ['note' => mb_substr(trim(strip_tags((string) ($data['note'] ?? ''))), 0, 1000)];
     }
 
     if (in_array($type, PROJECT_SLIDE_TYPES, true)) {
@@ -348,7 +361,7 @@ function project_find_or_create_for_assignment(PDO $pdo, int $assignmentId, int 
  * Guarda el progreso de un trabajo (autosave / guardar borrador).
  * No se puede editar un trabajo ya entregado.
  */
-function project_save(PDO $pdo, int $projectId, int $studentId, array $data, ?string $title = null): bool
+function project_save(PDO $pdo, int $projectId, int $studentId, array $data, ?string $title = null, ?string &$savedAt = null): bool
 {
     $stmt = $pdo->prepare('SELECT status, type, assignment_id FROM student_projects WHERE id = :id AND student_id = :sid');
     $stmt->execute(['id' => $projectId, 'sid' => $studentId]);
@@ -362,10 +375,11 @@ function project_save(PDO $pdo, int $projectId, int $studentId, array $data, ?st
         return false;
     }
 
+    $savedAt = now_datetime();
     $fields = 'data_json = :data_json, updated_at = :updated_at';
     $params = [
         'data_json' => json_encode(project_sanitize_data($data, $project['type'], $studentId)),
-        'updated_at' => now_datetime(), 'id' => $projectId, 'sid' => $studentId,
+        'updated_at' => $savedAt, 'id' => $projectId, 'sid' => $studentId,
     ];
 
     if ($title !== null && $title !== '') {
@@ -393,6 +407,12 @@ function project_submit(PDO $pdo, int $projectId, int $studentId): bool
     }
     if (assignment_lock_reason($pdo, $project['assignment_id'] ? (int) $project['assignment_id'] : null, $studentId) !== null) {
         return false;
+    }
+    if ($project['type'] === 'archivos') {
+        require_once __DIR__ . '/project_files_helpers.php';
+        if (project_files_summary($pdo, (int) $projectId)['count'] < 1) {
+            return false; // no se puede entregar una tarea de archivos sin ningún archivo
+        }
     }
 
     $pdo->beginTransaction();

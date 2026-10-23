@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
+require_once __DIR__ . '/../includes/project_files_helpers.php';
 
 require_role('teacher');
 
@@ -49,7 +50,7 @@ require __DIR__ . '/../includes/header.php';
 <div class="no-print" style="margin-bottom:16px;">
     <?php if (in_array($project['type'], PROJECT_CANVAS_TYPES, true)): ?>
         <button type="button" class="btn btn-secondary" id="btn-download-png" style="margin:0;">Descargar como PNG</button>
-    <?php elseif ($project['type'] !== 'presentacion'): ?>
+    <?php elseif (!in_array($project['type'], ['presentacion', 'archivos'], true)): ?>
         <button type="button" class="btn btn-secondary" onclick="window.print()" style="margin:0;">Imprimir / Guardar como PDF</button>
     <?php endif; ?>
 </div>
@@ -139,6 +140,70 @@ require __DIR__ . '/../includes/header.php';
             })();
             </script>
         <?php endif; ?>
+    <?php elseif ($project['type'] === 'archivos'): ?>
+        <?php
+        $pfiles = project_files_list($pdo, (int) $project['id'], true);
+        $pfSummary = project_files_summary($pdo, (int) $project['id']);
+        $dlBase = rtrim(APP_URL, '/') . '/api/submissions/download.php?id=';
+        $noteText = trim((string) ($data['note'] ?? ''));
+        ?>
+        <?php if (empty($pfiles)): ?>
+            <p class="text-muted">El estudiante todavía no ha subido archivos.</p>
+        <?php else: ?>
+            <p class="text-muted" style="margin-top:0;">
+                <span id="pf-summary"><?= (int) $pfSummary['count'] ?> archivo<?= $pfSummary['count'] === 1 ? '' : 's' ?> · <?= e(materials_format_size($pfSummary['bytes'])) ?></span>
+                <?php if ($pfSummary['deleted'] > 0): ?>· <?= (int) $pfSummary['deleted'] ?> eliminado<?= $pfSummary['deleted'] === 1 ? '' : 's' ?><?php endif; ?>
+            </p>
+            <ul style="list-style:none; margin:0; padding:0;" id="pf-list">
+                <?php foreach ($pfiles as $f):
+                    $ext = strtolower(pathinfo($f['stored_name'], PATHINFO_EXTENSION)); ?>
+                    <li data-id="<?= (int) $f['id'] ?>" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; border:1px solid var(--color-border); border-radius:10px; margin-bottom:8px;">
+                        <?php if (!empty($f['deleted_at'])): ?>
+                            <span>🗑️</span>
+                            <span class="text-muted" style="flex:1; font-style:italic;"><?= e($f['original_name']) ?> — <?= e(project_files_deleted_label($f)) ?></span>
+                        <?php else: ?>
+                            <span><?= materials_file_icon($f['original_name']) ?></span>
+                            <span style="flex:1; min-width:160px; word-break:break-word;"><?= e($f['original_name']) ?></span>
+                            <span class="text-muted" style="font-size:0.85rem;"><?= e(materials_format_size((int) $f['size_bytes'])) ?> · <?= e(date('d/m/Y H:i', strtotime($f['created_at']))) ?></span>
+                            <?php if (isset(PROJECT_FILE_INLINE_TYPES[$ext])): ?>
+                                <a class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.85rem;" target="_blank" rel="noopener" href="<?= e($dlBase . (int) $f['id'] . '&inline=1') ?>">👁️ Ver</a>
+                            <?php endif; ?>
+                            <a class="btn btn-secondary" style="margin:0; padding:4px 10px; font-size:0.85rem;" href="<?= e($dlBase . (int) $f['id']) ?>">⬇️ Descargar</a>
+                            <button type="button" class="btn btn-secondary pf-del" data-file="<?= (int) $f['id'] ?>" style="margin:0; padding:4px 10px; font-size:0.85rem; color:#C0392B; border-color:#C0392B;">🗑️ Borrar</button>
+                        <?php endif; ?>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+            <?php if ($pfSummary['count'] > 0): ?>
+                <p class="no-print" style="margin-top:12px;">
+                    <button type="button" class="btn btn-secondary" id="pf-del-all" style="margin:0; color:#C0392B; border-color:#C0392B;">🗑️ Borrar todos los archivos de este estudiante</button>
+                </p>
+                <p class="text-muted" style="font-size:0.8rem;">Borrar los archivos libera espacio en el hosting. La entrega y la calificación se conservan; el estudiante verá que el archivo fue eliminado.</p>
+            <?php endif; ?>
+        <?php endif; ?>
+        <?php if ($noteText !== ''): ?>
+            <p style="margin-top:12px;"><strong>Comentario del estudiante:</strong> <?= nl2br(e($noteText)) ?></p>
+        <?php endif; ?>
+        <script>
+        (function () {
+            const API = <?= json_encode(rtrim(APP_URL, '/') . '/api/submissions/delete_files.php') ?>;
+            const CSRF = <?= json_encode(csrf_token()) ?>;
+            async function del(body, question) {
+                if (!confirm(question)) return;
+                try {
+                    const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, csrf_token: CSRF }) });
+                    const data = await res.json();
+                    alert(data.message || (data.success ? 'Listo.' : 'No se pudo borrar.'));
+                    if (data.success) location.reload();
+                } catch (e) { alert('No se pudo borrar (revisa tu conexión).'); }
+            }
+            document.querySelectorAll('.pf-del').forEach(b => b.addEventListener('click', () =>
+                del({ file_id: parseInt(b.dataset.file, 10) }, '¿Borrar este archivo del servidor? No se puede deshacer.')));
+            const all = document.getElementById('pf-del-all');
+            if (all) all.addEventListener('click', () =>
+                del({ project_id: <?= (int) $project['id'] ?> }, '¿Borrar TODOS los archivos de este estudiante? No se puede deshacer. La entrega y la nota se conservan.'));
+        })();
+        </script>
     <?php elseif ($project['type'] === 'tabla_comparativa'): ?>
         <?php $columns = $data['columns'] ?? []; $rows = $data['rows'] ?? []; ?>
         <table style="width:100%; border-collapse:collapse;">

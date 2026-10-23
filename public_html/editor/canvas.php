@@ -112,6 +112,7 @@ require __DIR__ . '/../includes/header.php';
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/image_upload.js"></script>
+<script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/draft_guard.js"></script>
 <script>
 const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;
 const PROJECT_ID = <?= (int) $project['id'] ?>;
@@ -363,38 +364,34 @@ if (!IS_SUBMITTED) {
     }
 
     // ---- Guardar / Entregar ----
-    async function saveDraft(silent) {
-        const statusEl = document.getElementById('save-status');
-        if (!silent) statusEl.textContent = 'Guardando...';
-        const json = canvas.toJSON(CUSTOM_PROPS);
-        try {
-            const res = await fetch(`${AULA_APP_URL}/api/projects/save.php`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    project_id: PROJECT_ID,
-                    title: document.getElementById('title_input').value,
-                    data: {
-                        width: canvas.width,
-                        height: canvas.height,
-                        backgroundColor: canvas.backgroundColor,
-                        objects: json.objects,
-                    },
-                    csrf_token: CSRF_TOKEN,
-                }),
-            });
-            const data = await res.json();
-            statusEl.textContent = data.success ? 'Guardado ' + new Date().toLocaleTimeString() : (data.message || 'No se pudo guardar');
-        } catch (e) {
-            statusEl.textContent = 'No se pudo guardar (revisa tu conexión).';
-        }
-    }
+    AulaDraft.init({
+        appUrl: AULA_APP_URL, projectId: PROJECT_ID, csrf: CSRF_TOKEN, userKey: <?= (int) $studentId ?>, version: <?= json_encode($project['updated_at']) ?>,
+        statusEl: document.getElementById('save-status'),
+        getState: () => {
+            if (isRestoring) return null;   // el lienzo todavía está cargando: nunca guardar un lienzo vacío por error
+            return {
+                title: document.getElementById('title_input').value,
+                data: { width: canvas.width, height: canvas.height, backgroundColor: canvas.backgroundColor, objects: canvas.toJSON(CUSTOM_PROPS).objects },
+            };
+        },
+        applyState: (st) => new Promise((resolve) => {
+            if (st.title !== undefined) document.getElementById('title_input').value = st.title;
+            const d = st.data || {};
+            isRestoring = true;
+            canvas.setWidth(d.width || 800);
+            canvas.setHeight(d.height || 1200);
+            canvas.setBackgroundColor(d.backgroundColor || '#ffffff', canvas.renderAll.bind(canvas));
+            const bg = document.getElementById('bg-color'); if (bg && d.backgroundColor) bg.value = d.backgroundColor;
+            canvas.loadFromJSON({ objects: d.objects || [] }, () => { canvas.renderAll(); isRestoring = false; pushHistory(); resolve(); });
+        }),
+    });
+    const saveDraft = (silent) => AulaDraft.saveNow(silent);
 
     document.getElementById('btn-save').addEventListener('click', () => saveDraft(false));
 
     document.getElementById('btn-submit').addEventListener('click', async () => {
         if (!confirm('Una vez enviada, no podrás modificarla. ¿Entregar ahora?')) return;
-        await saveDraft(true);
+        if (!(await saveDraft(true))) { alert('No se pudo guardar tu trabajo. Revisa tu conexión e intenta de nuevo.'); return; }
         const res = await fetch(`${AULA_APP_URL}/api/projects/submit.php`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -402,13 +399,13 @@ if (!IS_SUBMITTED) {
         });
         const data = await res.json();
         if (data.success) {
+            AulaDraft.clearLocal();
             window.location.href = `${AULA_APP_URL}/student/assignment.php?id=${ASSIGNMENT_ID}`;
         } else {
             alert(data.message || 'No se pudo entregar el trabajo.');
         }
     });
 
-    setInterval(() => saveDraft(true), 20000);
 }
 </script>
 <?php require __DIR__ . '/../includes/footer.php'; ?>

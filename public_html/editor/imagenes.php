@@ -101,6 +101,7 @@ require __DIR__ . '/../includes/header.php';
 
 <?php if (!$isSubmitted): ?>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/image_upload.js"></script>
+<script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/draft_guard.js"></script>
 <script>
 const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;
 const PROJECT_ID = <?= (int) $project['id'] ?>;
@@ -110,7 +111,6 @@ const MAX_IMAGES = <?= (int) PROJECT_MAX_IMAGES ?>;
 
 let images = <?= json_encode(array_values($images), JSON_UNESCAPED_UNICODE) ?>;   // [{url, caption, name}]
 let pending = 0;                                                                   // subidas en curso
-let dirty = false;
 
 const grid = document.getElementById('grid');
 const msg = document.getElementById('msg');
@@ -134,7 +134,7 @@ function render() {
         dn.disabled = i === images.length - 1; dn.addEventListener('click', () => { [images[i + 1], images[i]] = [images[i], images[i + 1]]; changed(); });
         mv.append(up, dn);
         const cap = document.createElement('input'); cap.type = 'text'; cap.maxLength = 200; cap.placeholder = 'Pie de foto (opcional)'; cap.value = img.caption || '';
-        cap.addEventListener('input', () => { img.caption = cap.value; dirty = true; });
+        cap.addEventListener('input', () => { img.caption = cap.value; });
         card.append(thumb, rm, mv, cap);
         grid.appendChild(card);
     });
@@ -146,27 +146,17 @@ function render() {
     empty.style.display = (images.length === 0 && pending === 0) ? '' : 'none';
 }
 
-function changed() { dirty = true; render(); scheduleSave(); }
+function changed() { render(); }   // el guardado lo hace draft_guard.js (servidor + copia local)
 
-let saveTimer = null;
-function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => saveDraft(true), 1500); }
-
-async function saveDraft(silent) {
-    if (!silent) statusEl.textContent = 'Guardando...';
-    try {
-        const res = await fetch(`${AULA_APP_URL}/api/projects/save.php`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ project_id: PROJECT_ID, data: { images }, csrf_token: CSRF_TOKEN }),
-        });
-        const data = await res.json();
-        if (data.success) { dirty = false; statusEl.textContent = 'Guardado ' + new Date().toLocaleTimeString(); }
-        else { statusEl.textContent = data.message || 'No se pudo guardar'; }
-        return !!data.success;
-    } catch (e) {
-        statusEl.textContent = 'No se pudo guardar (revisa tu conexión).';
-        return false;
-    }
-}
+// Autoguardado compartido: guarda pronto, mantiene copia local y guarda al cerrar/actualizar la página
+AulaDraft.init({
+    appUrl: AULA_APP_URL, projectId: PROJECT_ID, csrf: CSRF_TOKEN, userKey: <?= (int) $studentId ?>, version: <?= json_encode($project['updated_at']) ?>,
+    statusEl: statusEl,
+    getState: () => ({ data: { images } }),
+    applyState: (s) => { if (s.data && Array.isArray(s.data.images)) { images = s.data.images; render(); } },
+    isBusy: () => pending > 0,
+});
+const saveDraft = (silent) => AulaDraft.saveNow(silent);
 
 async function addFiles(fileList) {
     const files = Array.from(fileList).filter(f => /^image\//i.test(f.type));
@@ -186,7 +176,7 @@ async function addFiles(fileList) {
         render();
     }
     if (errors.length) msg.textContent = '⚠️ ' + errors.join(' · ');
-    dirty = true; saveDraft(true);
+    saveDraft(true);   // las fotos ya están en el servidor: se guardan en la lista de inmediato
 }
 
 const fileInput = document.getElementById('file-input');
@@ -211,11 +201,10 @@ document.getElementById('btn-submit').addEventListener('click', async () => {
         body: JSON.stringify({ project_id: PROJECT_ID, csrf_token: CSRF_TOKEN }),
     });
     const data = await res.json();
-    if (data.success) window.location.href = `${AULA_APP_URL}/student/assignment.php?id=${ASSIGNMENT_ID}`;
+    if (data.success) { AulaDraft.clearLocal(); window.location.href = `${AULA_APP_URL}/student/assignment.php?id=${ASSIGNMENT_ID}`; }
     else alert(data.message || 'No se pudo entregar el trabajo.');
 });
 
-window.addEventListener('beforeunload', (e) => { if (dirty || pending > 0) { e.preventDefault(); e.returnValue = ''; } });
 render();
 </script>
 <?php endif; ?>

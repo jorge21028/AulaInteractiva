@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
+require_once __DIR__ . '/../includes/project_files_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/description_helpers.php';
 require_once __DIR__ . '/../includes/submission_admin_helpers.php';
@@ -184,6 +185,24 @@ $rosterStmt->execute([
 ]);
 $roster = $rosterStmt->fetchAll();
 
+// Entrega de archivos: archivos de cada estudiante (para verlos, descargarlos y borrarlos desde esta pantalla)
+$isFilesAssignment = ($assignment['project_type'] ?? '') === 'archivos';
+$filesByProject = [];
+$filesTotal = ['count' => 0, 'bytes' => 0];
+if ($isFilesAssignment) {
+    $pids = array_values(array_filter(array_map('intval', array_column($roster, 'draft_project_id'))));
+    if ($pids) {
+        $fstmt = $pdo->query('SELECT * FROM project_files WHERE project_id IN (' . implode(',', $pids) . ') ORDER BY id ASC');
+        foreach ($fstmt->fetchAll() as $f) {
+            $filesByProject[(int) $f['project_id']][] = $f;
+            if (empty($f['deleted_at'])) {
+                $filesTotal['count']++;
+                $filesTotal['bytes'] += (int) $f['size_bytes'];
+            }
+        }
+    }
+}
+
 /** "hace 5 min", "hace 2 h" o la fecha si ya pasó más de un día. */
 function roster_time_ago(?string $datetime): string
 {
@@ -259,7 +278,7 @@ function roster_progress(array $r, array $assignment): array
             ];
         }
         if ($r['draft_project_id'] && $r['project_status'] !== 'submitted') {
-            if (project_has_content($r['draft_type'], $r['draft_data'])) {
+            if (project_has_content($r['draft_type'], $r['draft_data'], (int) ($r['draft_files'] ?? 0))) {
                 return [
                     'state' => 'working', 'label' => '✏️ Trabajando',
                     'detail' => 'última edición ' . roster_time_ago($r['project_updated_at']),
@@ -277,6 +296,11 @@ function roster_progress(array $r, array $assignment): array
 
 $progressCounts = ['completed' => 0, 'returned' => 0, 'working' => 0, 'opened' => 0, 'notstarted' => 0];
 foreach ($roster as $i => $row) {
+    $myFiles = $filesByProject[(int) ($row['draft_project_id'] ?? 0)] ?? [];
+    $roster[$i]['files'] = $myFiles;
+    $roster[$i]['files_active'] = array_values(array_filter($myFiles, fn($f) => empty($f['deleted_at'])));
+    $roster[$i]['draft_files'] = count($roster[$i]['files_active']);
+    $row['draft_files'] = $roster[$i]['draft_files'];
     $roster[$i]['progress'] = roster_progress($row, $assignment);
     // ¿Hay algo que borrar? (entrega, trabajo, intentos de cuestionario o de juego)
     $roster[$i]['has_data'] = $row['status'] === 'completed' || !empty($row['draft_project_id']) || !empty($row['wg_status'])
@@ -365,6 +389,16 @@ require __DIR__ . '/../includes/header.php';
 
 <section class="card">
     <h2 style="margin-top:0;">Entregas (<?= count($roster) ?>)</h2>
+    <?php if ($isFilesAssignment): ?>
+        <p class="text-muted" id="files-total" style="margin:-4px 0 12px;">
+            📎 <?= (int) $filesTotal['count'] ?> archivo<?= $filesTotal['count'] === 1 ? '' : 's' ?> en el servidor · <?= e(materials_format_size($filesTotal['bytes'])) ?>
+            <?php if ($filesTotal['count'] > 0): ?>
+                · <button type="button" class="btn btn-secondary btn-files-del" data-scope="assignment_id" data-id="<?= (int) $assignmentId ?>"
+                          data-question="¿Borrar TODOS los archivos de esta asignación (de todos los estudiantes)? No se puede deshacer. Las entregas y las notas se conservan."
+                          style="margin:0 0 0 6px; padding:4px 10px; font-size:0.85rem; color:#C0392B; border-color:#C0392B;">🗑️ Borrar todos los archivos de la asignación</button>
+            <?php endif; ?>
+        </p>
+    <?php endif; ?>
 
     <?php if (empty($roster)): ?>
         <p class="empty-state">No hay estudiantes inscritos en esta asignatura todavía.</p>
@@ -427,6 +461,21 @@ require __DIR__ . '/../includes/header.php';
                                     <?php if ($pg['detail'] !== ''): ?>· <?= e($pg['detail']) ?><?php endif; ?>
                                 <?php endif; ?>
                             </p>
+                            <?php if ($isFilesAssignment && !empty($r['files'])): ?>
+                                <ul style="list-style:none; margin:6px 0 0; padding:0; font-size:0.85rem;">
+                                    <?php foreach ($r['files'] as $f): ?>
+                                        <li style="margin:2px 0;">
+                                            <?php if (!empty($f['deleted_at'])): ?>
+                                                <span class="text-muted" style="font-style:italic;">🗑️ <?= e($f['original_name']) ?> — <?= e(project_files_deleted_label($f)) ?></span>
+                                            <?php else: ?>
+                                                <?= materials_file_icon($f['original_name']) ?>
+                                                <a href="../api/submissions/download.php?id=<?= (int) $f['id'] ?>"><?= e($f['original_name']) ?></a>
+                                                <span class="text-muted">(<?= e(materials_format_size((int) $f['size_bytes'])) ?>)</span>
+                                            <?php endif; ?>
+                                        </li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            <?php endif; ?>
                             <?php if ($r['project_id']): ?>
                                 <a href="view_project.php?id=<?= (int) $r['project_id'] ?>" style="font-size:0.85rem;">Ver trabajo entregado &rarr;</a>
                             <?php elseif (!empty($r['progress']['link'])): ?>
@@ -478,6 +527,16 @@ require __DIR__ . '/../includes/header.php';
                             <input type="text" name="feedbacks[<?= $sid ?>]" value="<?= e($feedbackValue) ?>"
                                    data-original="<?= e($r['feedback'] ?? '') ?>">
                         </div>
+                        <?php if ($isFilesAssignment && $r['draft_files'] > 0):
+                            $rowBytes = array_sum(array_map(fn($f) => (int) $f['size_bytes'], $r['files_active'])); ?>
+                            <div>
+                                <button type="button" class="btn btn-secondary btn-files-del" data-scope="project_id" data-id="<?= (int) $r['draft_project_id'] ?>"
+                                        data-question="¿Borrar los <?= (int) $r['draft_files'] ?> archivo(s) de <?= e($r['student_name']) ?>? No se puede deshacer. La entrega y la nota se conservan."
+                                        style="margin:0; padding:8px 12px; font-size:0.85rem; color:#C0392B; border-color:#C0392B;">
+                                    🗑️ Borrar archivos (<?= (int) $r['draft_files'] ?> · <?= e(materials_format_size($rowBytes)) ?>)
+                                </button>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endforeach; ?>
@@ -628,4 +687,30 @@ require __DIR__ . '/../includes/header.php';
     }));
 })();
 </script>
+<?php if ($isFilesAssignment): ?>
+<script>
+// Borrar archivos entregados (libera espacio en el hosting). Sin recargar la página, para no perder calificaciones sin guardar.
+(function () {
+    const API = <?= json_encode(rtrim(APP_URL, '/') . '/api/submissions/delete_files.php') ?>;
+    const CSRF = <?= json_encode(csrf_token()) ?>;
+    document.querySelectorAll('.btn-files-del').forEach(btn => btn.addEventListener('click', async () => {
+        if (!confirm(btn.dataset.question)) return;
+        btn.disabled = true;
+        try {
+            const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ [btn.dataset.scope]: parseInt(btn.dataset.id, 10), csrf_token: CSRF }) });
+            const data = await res.json();
+            alert(data.message || (data.success ? 'Listo.' : 'No se pudo borrar.'));
+            if (data.success) {
+                // Si hay calificaciones sin guardar, no se recarga: se avisa y la lista se actualiza al guardar/recargar.
+                const pending = document.getElementById('grades-status');
+                if (pending && pending.textContent.indexOf('sin guardar') !== -1) {
+                    btn.textContent = '✅ Archivos borrados (guarda las notas y recarga para ver la lista)';
+                } else { location.reload(); }
+            } else { btn.disabled = false; }
+        } catch (e) { alert('No se pudo borrar (revisa tu conexión).'); btn.disabled = false; }
+    }));
+})();
+</script>
+<?php endif; ?>
 <?php require __DIR__ . '/../includes/footer.php'; ?>

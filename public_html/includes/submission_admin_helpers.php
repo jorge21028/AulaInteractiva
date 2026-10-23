@@ -90,9 +90,16 @@ function submission_delete_entry(PDO $pdo, array $assignment, int $submissionId)
     $aid = (int) $assignment['id'];
     $sid = (int) $sub['student_id'];
 
+    require_once __DIR__ . '/project_files_helpers.php';
+    $fileNames = [];
+
     $pdo->beginTransaction();
     try {
-        // Trabajo de creación
+        // Trabajo de creación (si es una entrega de archivos, primero se sueltan sus archivos para borrarlos del disco)
+        $pj = $pdo->prepare('SELECT id FROM student_projects WHERE assignment_id = :aid AND student_id = :sid');
+        $pj->execute(['aid' => $aid, 'sid' => $sid]);
+        $fileNames = project_files_detach_for_projects($pdo, array_column($pj->fetchAll(), 'id'));
+
         $pdo->prepare('DELETE FROM student_projects WHERE assignment_id = :aid AND student_id = :sid')
             ->execute(['aid' => $aid, 'sid' => $sid]);
 
@@ -126,6 +133,8 @@ function submission_delete_entry(PDO $pdo, array $assignment, int $submissionId)
         error_log('submission_delete_entry: ' . $e->getMessage());
         return [false, 'No se pudo borrar la entrega. Intenta de nuevo.'];
     }
+
+    project_files_remove_disk($fileNames); // ya confirmado en la BD: liberar el espacio en disco
 
     return [true, 'Se borró la entrega de ' . $sub['student_name'] . '. Ya puede hacer la asignación de nuevo.'];
 }

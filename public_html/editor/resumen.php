@@ -78,6 +78,7 @@ require __DIR__ . '/../includes/header.php';
 <?php if (!$isSubmitted): ?>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.6/quill.min.js"></script>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/image_upload.js"></script>
+<script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/draft_guard.js"></script>
 <script>
 const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;
 const PROJECT_ID = <?= (int) $project['id'] ?>;
@@ -154,31 +155,22 @@ document.getElementById('file-video').addEventListener('change', async (e) => {
     e.target.value = '';
 });
 
-async function saveDraft(silent) {
-    const statusEl = document.getElementById('save-status');    if (!silent) statusEl.textContent = 'Guardando...';
-    try {
-        const res = await fetch(`${AULA_APP_URL}/api/projects/save.php`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                project_id: PROJECT_ID,
-                title: document.getElementById('title_input').value,
-                data: { html: quill.root.innerHTML },
-                csrf_token: CSRF_TOKEN,
-            }),
-        });
-        const data = await res.json();
-        statusEl.textContent = data.success ? 'Guardado ' + new Date().toLocaleTimeString() : (data.message || 'No se pudo guardar');
-    } catch (e) {
-        statusEl.textContent = 'No se pudo guardar (revisa tu conexión).';
-    }
-}
+AulaDraft.init({
+    appUrl: AULA_APP_URL, projectId: PROJECT_ID, csrf: CSRF_TOKEN, userKey: <?= (int) $studentId ?>, version: <?= json_encode($project['updated_at']) ?>,
+    statusEl: document.getElementById('save-status'),
+    getState: () => ({ title: document.getElementById('title_input').value, data: { html: quill.root.innerHTML } }),
+    applyState: (s) => {
+        if (s.title !== undefined) document.getElementById('title_input').value = s.title;
+        quill.setContents(quill.clipboard.convert((s.data && s.data.html) || ''), 'silent');
+    },
+});
+const saveDraft = (silent) => AulaDraft.saveNow(silent);
 
 document.getElementById('btn-save').addEventListener('click', () => saveDraft(false));
 
 document.getElementById('btn-submit').addEventListener('click', async () => {
     if (!confirm('Una vez enviada, no podrás modificarla. ¿Entregar ahora?')) return;
-    await saveDraft(true);
+    if (!(await saveDraft(true))) { alert('No se pudo guardar tu trabajo. Revisa tu conexión e intenta de nuevo.'); return; }
     const res = await fetch(`${AULA_APP_URL}/api/projects/submit.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -186,15 +178,14 @@ document.getElementById('btn-submit').addEventListener('click', async () => {
     });
     const data = await res.json();
     if (data.success) {
+        AulaDraft.clearLocal();
         window.location.href = `${AULA_APP_URL}/student/assignment.php?id=${ASSIGNMENT_ID}`;
     } else {
         alert(data.message || 'No se pudo entregar el trabajo.');
     }
 });
 
-// Autoguardado cada 20 segundos
-setInterval(() => saveDraft(true), 20000);
-window.addEventListener('beforeunload', () => { navigator.sendBeacon && saveDraft(true); });
+// El autoguardado, la copia local y el guardado al cerrar la página los maneja assets/js/draft_guard.js
 </script>
 <?php endif; ?>
 <?php require __DIR__ . '/../includes/footer.php'; ?>
