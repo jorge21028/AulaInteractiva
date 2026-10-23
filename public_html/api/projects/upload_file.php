@@ -12,6 +12,7 @@ require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/availability_helpers.php';
 require_once __DIR__ . '/../../includes/project_files_helpers.php';
+require_once __DIR__ . '/../../includes/group_helpers.php';
 
 header('Content-Type: application/json; charset=utf-8');
 require_role('student');
@@ -31,7 +32,7 @@ $studentId = (int) current_user_id();
 $pdo = Database::getConnection();
 
 $stmt = $pdo->prepare('SELECT * FROM student_projects WHERE id = :id AND student_id = :sid AND type = \'archivos\' LIMIT 1');
-$stmt->execute(['id' => $projectId, 'sid' => $studentId]);
+$stmt->execute(['id' => $projectId, 'sid' => project_effective_student($pdo, $projectId, $studentId)]);
 $project = $stmt->fetch();
 
 if (!$project || $project['status'] === 'submitted') {

@@ -3,6 +3,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
+require_once __DIR__ . '/../includes/group_helpers.php';
 
 require_role('student');
 
@@ -16,7 +17,7 @@ $stmt = $pdo->prepare(
      LEFT JOIN assignments a ON a.id = sp.assignment_id
      WHERE sp.id = :id AND sp.student_id = :sid AND sp.type = "resumen" LIMIT 1'
 );
-$stmt->execute(['id' => $projectId, 'sid' => $studentId]);
+$stmt->execute(['id' => $projectId, 'sid' => project_effective_student($pdo, $projectId, (int) $studentId)]); // el dueño real (grupos)
 $project = $stmt->fetch();
 
 if (!$project) {
@@ -65,6 +66,7 @@ require __DIR__ . '/../includes/header.php';
         <div id="editor-container"><?= $data['html'] ?></div>
 
         <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; align-items:center;">
+            <button class="btn btn-secondary" id="btn-templates" type="button" style="margin:0;">📄 Plantillas</button>
             <button class="btn btn-secondary" id="btn-save" style="margin:0;">Guardar borrador</button>
             <button class="btn" id="btn-submit" style="margin:0;">Entregar actividad</button>
             <span class="text-muted" id="save-status" style="font-size:0.85rem;"></span>
@@ -79,6 +81,7 @@ require __DIR__ . '/../includes/header.php';
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.6/quill.min.js"></script>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/image_upload.js"></script>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/draft_guard.js"></script>
+<script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/template_picker.js"></script>
 <script>
 const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;
 const PROJECT_ID = <?= (int) $project['id'] ?>;
@@ -154,6 +157,11 @@ document.getElementById('file-video').addEventListener('change', async (e) => {
     }
     e.target.value = '';
 });
+
+const btnTpl = document.getElementById('btn-templates');
+
+if (btnTpl) btnTpl.addEventListener('click', () => AulaTemplates.open({ type: 'resumen', appUrl: AULA_APP_URL }));
+
 
 AulaDraft.init({
     appUrl: AULA_APP_URL, projectId: PROJECT_ID, csrf: CSRF_TOKEN, userKey: <?= (int) $studentId ?>, version: <?= json_encode($project['updated_at']) ?>,

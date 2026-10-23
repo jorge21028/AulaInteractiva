@@ -24,6 +24,7 @@ const PROJECT_TYPES = [
     'presentacion' => 'Presentación',
     'imagenes' => 'Entrega de imágenes (fotos)',
     'archivos' => 'Entrega de archivos (PDF, Word, Excel...)',
+    'foro' => 'Foro de discusión (tipo Moodle)',
 ];
 
 /** Máximo de imágenes por entrega de tipo "imagenes". */
@@ -82,8 +83,17 @@ function project_default_data(string $type): array
  * Se compara con la estructura inicial de cada tipo. IMPORTANTE: no se usa la hora de la última edición
  * porque los editores autoguardan cada 20 s aunque el estudiante no haya escrito nada.
  */
-function project_has_content(string $type, ?string $dataJson, int $fileCount = 0): bool
+function project_has_content(string $type, ?string $dataJson, int $fileCount = 0, ?string $templateKey = null): bool
 {
+    // Un trabajo que sigue idéntico a la plantilla inicial que puso el profesor todavía no tiene contenido propio.
+    if ($templateKey) {
+        require_once __DIR__ . '/templates_helpers.php';
+        $tpl = templates_data($type, $templateKey);
+        if ($tpl !== null && json_decode((string) $dataJson, true) == $tpl) {
+            return false;
+        }
+    }
+
     // Entrega de archivos: lo que cuenta son los archivos subidos (viven en project_files, no en data_json).
     if ($type === 'archivos') {
         $note = is_array($d = json_decode((string) $dataJson, true)) ? trim((string) ($d['note'] ?? '')) : '';
@@ -338,6 +348,20 @@ function project_find_or_create_for_assignment(PDO $pdo, int $assignmentId, int 
         return $project;
     }
 
+    // Plantilla inicial elegida por el profesor para esta asignación (si la hay)
+    $initial = project_default_data($type);
+    try {
+        $tk = $pdo->prepare('SELECT template_key FROM assignments WHERE id = :id');
+        $tk->execute(['id' => $assignmentId]);
+        require_once __DIR__ . '/templates_helpers.php';
+        $fromTemplate = templates_data($type, $tk->fetchColumn() ?: null);
+        if ($fromTemplate !== null) {
+            $initial = $fromTemplate;
+        }
+    } catch (Throwable $e) {
+        // columna template_key aún no creada: se usa la estructura vacía de siempre
+    }
+
     $insert = $pdo->prepare(
         "INSERT INTO student_projects (student_id, assignment_id, type, title, data_json, status, created_at, updated_at)
          VALUES (:sid, :aid, :type, :title, :data_json, 'draft', :created_at, :updated_at)"
@@ -348,7 +372,7 @@ function project_find_or_create_for_assignment(PDO $pdo, int $assignmentId, int 
         'aid' => $assignmentId,
         'type' => $type,
         'title' => $defaultTitle,
-        'data_json' => json_encode(project_default_data($type)),
+        'data_json' => json_encode($initial),
         'created_at' => $now,
         'updated_at' => $now,
     ]);
@@ -423,7 +447,7 @@ function project_submit(PDO $pdo, int $projectId, int $studentId): bool
 
         if ($project['assignment_id']) {
             $subStmt = $pdo->prepare(
-                'SELECT id, reviewed_at FROM submissions WHERE assignment_id = :aid AND student_id = :sid'
+                'SELECT id, reviewed_at, returned_at FROM submissions WHERE assignment_id = :aid AND student_id = :sid'
             );
             $subStmt->execute(['aid' => $project['assignment_id'], 'sid' => $studentId]);
             $submission = $subStmt->fetch();
@@ -449,6 +473,16 @@ function project_submit(PDO $pdo, int $projectId, int $studentId): bool
                     'completed_at' => now_datetime(), 'created_at' => now_datetime(),
                 ]);
             }
+        }
+
+        if ($project['assignment_id']) {
+            require_once __DIR__ . '/late_helpers.php';
+            // Un trabajo que el profesor devolvió para corregir conserva su retraso original (no se vuelve a penalizar).
+            if (empty($submission['returned_at'] ?? null)) {
+                late_stamp_submission($pdo, (int) $project['assignment_id'], $studentId);
+            }
+            require_once __DIR__ . '/group_helpers.php';
+            group_propagate_submission($pdo, (int) $project['assignment_id'], $studentId, $projectId);
         }
 
         $pdo->commit();

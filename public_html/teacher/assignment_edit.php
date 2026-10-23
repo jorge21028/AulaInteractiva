@@ -12,6 +12,7 @@ require_once __DIR__ . '/../includes/project_helpers.php';
 require_once __DIR__ . '/../includes/space_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/description_field.php';
+require_once __DIR__ . '/../includes/assignment_extras.php';
 
 require_role('teacher');
 
@@ -37,6 +38,16 @@ if (!$assignment) {
     http_response_code(404);
     exit('Asignación no encontrada.');
 }
+
+// Opciones avanzadas (solo trabajos de creación): entrega tardía, grupos, plantilla, foro
+$isCreationWork = !empty($assignment['project_type']);
+$workStarted = false;
+if ($isCreationWork) {
+    $ws = $pdo->prepare('SELECT COUNT(*) FROM student_projects WHERE assignment_id = :id');
+    $ws->execute(['id' => $assignmentId]);
+    $workStarted = (int) $ws->fetchColumn() > 0;
+}
+$extras = assignment_extras_defaults($assignment);
 
 // ¿Cuántas entregas ya tienen nota? (para avisar si cambia el puntaje)
 $gradedStmt = $pdo->prepare('SELECT COUNT(*) AS total FROM submissions WHERE assignment_id = :id AND score IS NOT NULL');
@@ -77,6 +88,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($startDate !== null && $dueDate !== null && $dueDate <= $startDate) {
         $errors[] = 'La fecha y hora de entrega deben ser posteriores a las de inicio.';
     }
+
+    $extrasPosted = $extras;
+    if ($isCreationWork) {
+        [$extrasPosted, $extraErrors] = assignment_extras_from_post($_POST, (string) $assignment['project_type']);
+        $errors = array_merge($errors, $extraErrors);
+        if ($extrasPosted['late_allowed'] && $dueDate === null && empty($assignment['due_date'])) {
+            $errors[] = 'Para permitir entregas tardías la asignación necesita fecha de entrega.';
+        }
+        if ($workStarted) { // con trabajos empezados no se cambia el modo grupo
+            $extrasPosted['group_mode'] = $extras['group_mode'];
+            $extrasPosted['group_size'] = $extras['group_size'];
+        }
+        $extras = $extrasPosted;
+    }
     if ($points < 1 || $points > 65000) {
         $errors[] = 'La puntuación debe ser un número entre 1 y 65000.';
     }
@@ -90,6 +115,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'title' => $form['title'], 'description' => $form['description'], 'description_format' => $form['description_format'], 'start_date' => $startDate,
             'due_date' => $dueDate, 'points' => $points, 'id' => $assignmentId, 'tid' => $teacherId,
         ]);
+        if ($isCreationWork) {
+            assignment_extras_save($pdo, $assignmentId, $extrasPosted, !$workStarted);
+        }
         audit_log($pdo, $teacherId, 'update_assignment', "Asignación #{$assignmentId} editada ('{$form['title']}')");
         redirect('teacher/assignment_detail.php?id=' . $assignmentId . '&updated=1');
     }
@@ -139,6 +167,8 @@ require __DIR__ . '/../includes/header.php';
                 ⚠️ Ya hay <?= $gradedCount ?> entrega(s) con nota. Cambiar la puntuación <strong>no recalcula</strong> las notas ya registradas.
             </p>
         <?php endif; ?>
+
+        <?php if ($isCreationWork): assignment_extras_render($extras, $assignment['project_type'], $workStarted); endif; ?>
 
         <p class="text-muted" style="font-size:0.85rem;">
             No se puede cambiar el tipo (<?= e($kind) ?>) ni la asignatura, porque los estudiantes pueden tener avance sobre ese contenido.

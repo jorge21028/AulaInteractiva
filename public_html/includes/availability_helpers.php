@@ -100,6 +100,20 @@ function assignment_window_state(array $assignment, ?string $now = null): string
 }
 
 /**
+ * ¿Estamos en el período de gracia de una asignación que acepta entregas tardías con penalización?
+ * (pasó la fecha límite, pero todavía no pasaron los días máximos que el profesor permitió)
+ */
+function assignment_late_window_open(array $assignment, ?string $now = null): bool
+{
+    if (empty($assignment['late_allowed']) || empty($assignment['due_date'])) {
+        return false;
+    }
+    $t = strtotime($now ?? now_datetime());
+    $due = strtotime((string) $assignment['due_date']);
+    return $t > $due && $t <= $due + ((int) ($assignment['late_max_days'] ?? 0)) * 86400;
+}
+
+/**
  * ¿Está vencida PARA ESTE ESTUDIANTE? Un trabajo que el profesor devolvió para corregir
  * (submissions.returned_at con la entrega otra vez pendiente) se considera reabierto: el profesor
  * lo pidió expresamente, así que el plazo original ya no lo bloquea.
@@ -111,6 +125,9 @@ function assignment_overdue_for_student(array $assignment, array $submission, ?s
     }
     if (!empty($submission['returned_at'])) {
         return false;
+    }
+    if (assignment_late_window_open($assignment, $now)) {
+        return false; // entrega tardía permitida (con penalización)
     }
     return assignment_is_past_due($assignment, $now);
 }
@@ -130,7 +147,7 @@ function assignment_lock_reason(PDO $pdo, ?int $assignmentId, int $studentId): ?
     }
 
     $stmt = $pdo->prepare(
-        'SELECT a.start_date, COALESCE(ax.due_date, a.due_date) AS due_date, c.is_active, sub.status AS sub_status, sub.returned_at
+        'SELECT a.start_date, COALESCE(ax.due_date, a.due_date) AS due_date, a.late_allowed, a.late_max_days, c.is_active, sub.status AS sub_status, sub.returned_at
          FROM assignments a
          INNER JOIN subjects s ON s.id = a.subject_id
          INNER JOIN courses c ON c.id = s.course_id

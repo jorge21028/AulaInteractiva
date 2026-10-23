@@ -7,6 +7,7 @@ require_once __DIR__ . '/../includes/assignment_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/description_field.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
+require_once __DIR__ . '/../includes/assignment_extras.php';
 require_once __DIR__ . '/../includes/space_helpers.php';
 require_once __DIR__ . '/../includes/submission_admin_helpers.php'; // estudiantes del curso
 
@@ -111,6 +112,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
 
         if (!array_key_exists($projectType, PROJECT_TYPES)) {
             $errors[] = 'Selecciona un tipo de trabajo válido.';
+        } else {
+            [$extras, $extraErrors] = assignment_extras_from_post($_POST, $projectType);
+            $errors = array_merge($errors, $extraErrors);
+            if (!empty($extras['late_allowed']) && empty($dueDate)) {
+                $errors[] = 'Para permitir entregas tardías la asignación necesita fecha de entrega.';
+            }
         }
         $validSubject = false;
         foreach ($subjects as $s) {
@@ -154,6 +161,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
                 $studentIds,
                 $descriptionFormat
             );
+            if (isset($extras)) {
+                assignment_extras_save($pdo, $assignmentId, $extras);
+            }
             audit_log(
                 $pdo, $teacherId, 'create_assignment',
                 "Asignación '{$title}' creada" . ($studentIds !== null ? ' solo para ' . count($studentIds) . ' estudiante(s)' : '')
@@ -301,6 +311,7 @@ require __DIR__ . '/../includes/header.php';
                 <p class="text-muted" style="font-size:0.8rem;">
                     El estudiante trabaja a su ritmo hasta la fecha de entrega. Tú calificas manualmente.
                 </p>
+                <?php assignment_extras_render(assignment_extras_defaults($_POST ?: null)); ?>
             </div>
 
             <label for="title">Título de la asignación</label>

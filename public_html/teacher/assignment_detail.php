@@ -4,6 +4,9 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
 require_once __DIR__ . '/../includes/project_files_helpers.php';
+require_once __DIR__ . '/../includes/late_helpers.php';
+require_once __DIR__ . '/../includes/group_helpers.php';
+require_once __DIR__ . '/../includes/forum_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/description_helpers.php';
 require_once __DIR__ . '/../includes/submission_admin_helpers.php';
@@ -85,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 
     // Estado actual de TODAS las entregas de esta asignación (solo las del profesor dueño, ya validado arriba)
     $currentStmt = $pdo->prepare(
-        'SELECT sub.id, sub.score, sub.feedback, sub.status, u.name AS student_name
+        'SELECT sub.id, sub.student_id, sub.score, sub.raw_score, sub.penalty_pct, sub.feedback, sub.status, u.name AS student_name
          FROM submissions sub INNER JOIN users u ON u.id = sub.student_id
          WHERE sub.assignment_id = :assignment_id'
     );
@@ -96,8 +99,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     }
 
     $update = $pdo->prepare(
-        'UPDATE submissions SET score = :score, feedback = :feedback, status = :status, reviewed_at = :reviewed_at WHERE id = :id'
+        'UPDATE submissions SET score = :score, raw_score = :raw_score, feedback = :feedback, status = :status, reviewed_at = :reviewed_at WHERE id = :id'
     );
+    $subByStudent = [];
+    foreach ($current as $cid => $c) {
+        $subByStudent[(int) $c['student_id']] = $cid;
+    }
+    $changedByStudent = [];   // para copiar la nota a los demás integrantes del grupo
+    $groupGrading = !empty($assignment['group_mode']);
 
     $saved = 0;
     $now = now_datetime();
@@ -124,7 +133,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
                 $score = round((float) $normalized, 2);
             }
 
-            $oldScore = $row['score'] !== null ? round((float) $row['score'], 2) : null;
+            // La nota que escribe el profesor es la nota SIN penalización; la final se calcula aquí.
+            $penalty = (float) ($row['penalty_pct'] ?? 0);
+            $shownScore = $row['raw_score'] ?? $row['score'];
+            $oldScore = $shownScore !== null ? round((float) $shownScore, 2) : null;
             $oldFeedback = (string) ($row['feedback'] ?? '');
 
             // Solo se tocan las entregas que realmente cambiaron: así no se marca como
@@ -135,10 +147,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 
             $newStatus = ($score !== null || $row['status'] === 'completed') ? 'completed' : $row['status'];
             $update->execute([
-                'score' => $score, 'feedback' => $feedback, 'status' => $newStatus,
+                'score' => $score !== null ? late_final_score($score, $penalty) : null,
+                'raw_score' => ($score !== null && $penalty > 0) ? $score : null,
+                'feedback' => $feedback, 'status' => $newStatus,
                 'reviewed_at' => $now, 'id' => $submissionId,
             ]);
+            $changedByStudent[(int) $row['student_id']] = ['score' => $score, 'feedback' => $feedback];
             $saved++;
+        }
+        // Trabajo en grupos: la nota y el comentario se copian a los demás integrantes (salvo a quien se calificó aparte en este mismo guardado)
+        if ($groupGrading && $changedByStudent) {
+            $touched = $changedByStudent;
+            foreach ($changedByStudent as $studentId => $c) {
+                foreach (group_mates($pdo, $assignmentId, (int) $studentId) as $mateId) {
+                    if (isset($touched[$mateId]) || !isset($subByStudent[$mateId])) {
+                        continue;
+                    }
+                    $mate = $current[$subByStudent[$mateId]];
+                    $mPenalty = (float) ($mate['penalty_pct'] ?? 0);
+                    $update->execute([
+                        'score' => $c['score'] !== null ? late_final_score($c['score'], $mPenalty) : null,
+                        'raw_score' => ($c['score'] !== null && $mPenalty > 0) ? $c['score'] : null,
+                        'feedback' => $c['feedback'], 'status' => ($c['score'] !== null || $mate['status'] === 'completed') ? 'completed' : $mate['status'],
+                        'reviewed_at' => $now, 'id' => $subByStudent[$mateId],
+                    ]);
+                    $touched[$mateId] = true;
+                }
+            }
         }
         $pdo->commit();
     } catch (Throwable $ex) {
@@ -158,7 +193,7 @@ $rosterStmt = $pdo->prepare(
     'SELECT sub.id AS submission_id, sub.student_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id, sub.quiz_attempt_id,
         qa.tab_switches, wga.status AS wg_status, wga.correct_count AS wg_correct, wga.total_count AS wg_total,
         wga.state_json AS wg_state, wga.updated_at AS wg_updated_at,
-        sub.returned_at, sub.return_note, sub.game_id,
+        sub.returned_at, sub.return_note, sub.game_id, sub.raw_score, sub.penalty_pct, sub.late_days, gg.name AS group_name,
         (SELECT COUNT(*) FROM quiz_attempts qa4 WHERE qa4.assignment_id = sub.assignment_id AND qa4.student_id = sub.student_id AND qa4.status <> \'in_progress\') AS quiz_done,
         (SELECT COUNT(*) FROM quiz_attempts qa3 WHERE qa3.assignment_id = sub.assignment_id AND qa3.student_id = sub.student_id) AS quiz_attempts_total,
         sp.id AS draft_project_id, sp.status AS project_status, sp.type AS draft_type, sp.data_json AS draft_data,
@@ -174,7 +209,9 @@ $rosterStmt = $pdo->prepare(
      INNER JOIN users u ON u.id = sub.student_id
      LEFT JOIN quiz_attempts qa ON qa.id = sub.quiz_attempt_id
      LEFT JOIN word_game_attempts wga ON wga.assignment_id = sub.assignment_id AND wga.student_id = sub.student_id
-     LEFT JOIN student_projects sp ON sp.assignment_id = sub.assignment_id AND sp.student_id = sub.student_id
+     LEFT JOIN assignment_group_members gm ON gm.assignment_id = sub.assignment_id AND gm.student_id = sub.student_id
+     LEFT JOIN assignment_groups gg ON gg.id = gm.group_id
+     LEFT JOIN student_projects sp ON sp.assignment_id = sub.assignment_id AND sp.student_id = COALESCE(gg.owner_id, sub.student_id)
      WHERE sub.assignment_id = :assignment_id
      ORDER BY u.name ASC'
 );
@@ -184,6 +221,15 @@ $rosterStmt->execute([
     'quiz_b' => $assignment['quiz_id'] ?? 0,
 ]);
 $roster = $rosterStmt->fetchAll();
+
+$isForumAssignment = ($assignment['project_type'] ?? '') === 'foro';
+$forumByStudent = [];
+if ($isForumAssignment) {
+    foreach (forum_participation_table($pdo, $assignmentId) as $fr) {
+        $forumByStudent[(int) $fr['id']] = $fr;
+    }
+}
+$isGroupAssignment = !empty($assignment['group_mode']);
 
 // Entrega de archivos: archivos de cada estudiante (para verlos, descargarlos y borrarlos desde esta pantalla)
 $isFilesAssignment = ($assignment['project_type'] ?? '') === 'archivos';
@@ -278,7 +324,7 @@ function roster_progress(array $r, array $assignment): array
             ];
         }
         if ($r['draft_project_id'] && $r['project_status'] !== 'submitted') {
-            if (project_has_content($r['draft_type'], $r['draft_data'], (int) ($r['draft_files'] ?? 0))) {
+            if (project_has_content($r['draft_type'], $r['draft_data'], (int) ($r['draft_files'] ?? 0), $assignment['template_key'] ?? null)) {
                 return [
                     'state' => 'working', 'label' => '✏️ Trabajando',
                     'detail' => 'última edición ' . roster_time_ago($r['project_updated_at']),
@@ -364,6 +410,12 @@ require __DIR__ . '/../includes/header.php';
 <?php endif; ?>
 <p>
     <a class="btn btn-secondary" href="assignment_edit.php?id=<?= (int) $assignmentId ?>">✏️ Editar asignación</a>
+    <?php if ($isGroupAssignment): ?>
+        <a class="btn btn-secondary" href="groups.php?id=<?= (int) $assignmentId ?>">👥 Armar grupos</a>
+    <?php endif; ?>
+    <?php if ($isForumAssignment): ?>
+        <a class="btn btn-secondary" href="../forum/view.php?id=<?= (int) $assignmentId ?>">💬 Abrir el foro</a>
+    <?php endif; ?>
     <?php if (!empty($assignment['due_date'])): ?>
         <a class="btn btn-secondary" href="assignment_extensions.php?id=<?= (int) $assignmentId ?>">⏰ Prórrogas por estudiante</a>
     <?php endif; ?>
@@ -431,7 +483,8 @@ require __DIR__ . '/../includes/header.php';
 
             <?php foreach ($roster as $r):
                 $sid = (int) $r['submission_id'];
-                $scoreValue = isset($postedOverride[$sid]) ? $postedOverride[$sid]['score'] : ($r['score'] !== null ? (string) $r['score'] : '');
+                $shown = $r['raw_score'] ?? $r['score'];
+                $scoreValue = isset($postedOverride[$sid]) ? $postedOverride[$sid]['score'] : ($shown !== null ? (string) $shown : '');
                 $feedbackValue = isset($postedOverride[$sid]) ? $postedOverride[$sid]['feedback'] : ($r['feedback'] ?? '');
             ?>
                 <div class="card grade-row" data-state="<?= e($r['progress']['state']) ?>" style="margin-bottom:10px; padding:14px 16px;">
@@ -475,6 +528,16 @@ require __DIR__ . '/../includes/header.php';
                                         </li>
                                     <?php endforeach; ?>
                                 </ul>
+                            <?php endif; ?>
+                            <?php if (!empty($r['group_name'])): ?>
+                                <div style="font-size:0.85rem;" class="text-muted">👥 <?= e($r['group_name']) ?></div>
+                            <?php endif; ?>
+                            <?php if ($isForumAssignment): $fp = $forumByStudent[(int) $r['student_id']] ?? ['threads' => 0, 'replies' => 0]; ?>
+                                <div style="font-size:0.85rem;">💬 <?= (int) $fp['threads'] ?> tema(s) · <?= (int) $fp['replies'] ?> respuesta(s)
+                                    · <a href="../forum/view.php?id=<?= (int) $assignmentId ?>&amp;student=<?= (int) $r['student_id'] ?>">Ver participación &rarr;</a></div>
+                            <?php endif; ?>
+                            <?php if ((float) ($r['penalty_pct'] ?? 0) > 0): ?>
+                                <div style="font-size:0.85rem; color:#B45309;">⏰ Entregó <?= (int) $r['late_days'] ?> día(s) tarde (−<?= e(rtrim(rtrim(number_format((float) $r['penalty_pct'], 2), '0'), '.')) ?>%)</div>
                             <?php endif; ?>
                             <?php if ($r['project_id']): ?>
                                 <a href="view_project.php?id=<?= (int) $r['project_id'] ?>" style="font-size:0.85rem;">Ver trabajo entregado &rarr;</a>
@@ -520,13 +583,21 @@ require __DIR__ . '/../includes/header.php';
                         <div>
                             <label style="margin-top:0;">Calificación (sobre <?= (int) $assignment['points'] ?>)</label>
                             <input type="text" inputmode="decimal" name="scores[<?= $sid ?>]" value="<?= e($scoreValue) ?>"
-                                   data-original="<?= e($r['score'] !== null ? (string) $r['score'] : '') ?>" style="width:100px;">
+                                   data-original="<?= e($shown !== null ? (string) $shown : '') ?>" style="width:100px;">
+                            <?php if ((float) ($r['penalty_pct'] ?? 0) > 0 && $r['score'] !== null): ?>
+                                <div class="text-muted" style="font-size:0.75rem; margin-top:2px;">Nota final con penalización: <strong><?= e((string) $r['score']) ?></strong></div>
+                            <?php endif; ?>
                         </div>
                         <div style="flex:1; min-width:200px;">
                             <label style="margin-top:0;">Retroalimentación</label>
                             <input type="text" name="feedbacks[<?= $sid ?>]" value="<?= e($feedbackValue) ?>"
                                    data-original="<?= e($r['feedback'] ?? '') ?>">
                         </div>
+                        <?php if (($r['project_id'] || $isForumAssignment) && $assignment['quiz_id'] === null && $assignment['activity_id'] === null): ?>
+                            <div>
+                                <button type="button" class="btn btn-secondary btn-ai-grade" data-submission="<?= $sid ?>" style="margin:0; padding:8px 12px; font-size:0.85rem;" title="Gemini propone una nota y un comentario; tú decides si los usas">✨ Sugerir con IA</button>
+                            </div>
+                        <?php endif; ?>
                         <?php if ($isFilesAssignment && $r['draft_files'] > 0):
                             $rowBytes = array_sum(array_map(fn($f) => (int) $f['size_bytes'], $r['files_active'])); ?>
                             <div>
@@ -713,4 +784,33 @@ require __DIR__ . '/../includes/header.php';
 })();
 </script>
 <?php endif; ?>
+<script>
+// ✨ Calificación asistida por Gemini: solo RELLENA los campos con una sugerencia; el profesor revisa y pulsa "Guardar calificaciones".
+(function () {
+    const API = <?= json_encode(rtrim(APP_URL, '/') . '/api/gemini/suggest_grade.php') ?>;
+    const CSRF = <?= json_encode(csrf_token()) ?>;
+    document.querySelectorAll('.btn-ai-grade').forEach(btn => btn.addEventListener('click', async () => {
+        const sid = btn.dataset.submission;
+        const row = btn.closest('[data-submission-row], tr, li, .card') || document;
+        const scoreInput = document.querySelector('input[name="scores[' + sid + ']"]');
+        const fbInput = document.querySelector('input[name="feedbacks[' + sid + ']"]');
+        if (scoreInput && scoreInput.value.trim() !== '' && !confirm('Ya hay una calificación escrita. ¿Reemplazarla por la sugerencia de la IA?')) return;
+        const old = btn.textContent; btn.disabled = true; btn.textContent = '✨ Analizando...';
+        try {
+            const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                body: JSON.stringify({ submission_id: parseInt(sid, 10), csrf_token: CSRF }) });
+            const data = await res.json();
+            if (!data.success) { alert(data.message || 'No se pudo obtener la sugerencia.'); return; }
+            scoreInput.value = data.score;
+            let fb = data.feedback;
+            if (data.improvements && data.improvements.length) fb += ' Para mejorar: ' + data.improvements.join('; ') + '.';
+            fbInput.value = fb;
+            [scoreInput, fbInput].forEach(i => i.dispatchEvent(new Event('input', { bubbles: true })));
+            btn.textContent = '✅ Sugerencia lista — revísala y guarda';
+            setTimeout(() => { btn.textContent = old; }, 6000);
+        } catch (e) { alert('No se pudo contactar a la IA. Revisa tu conexión e intenta de nuevo.'); }
+        finally { btn.disabled = false; if (btn.textContent === '✨ Analizando...') btn.textContent = old; }
+    }));
+})();
+</script>
 <?php require __DIR__ . '/../includes/footer.php'; ?>

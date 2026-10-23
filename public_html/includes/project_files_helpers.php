@@ -16,7 +16,8 @@ if (!defined('AULA_APP')) {
     exit('Acceso directo no permitido.');
 }
 
-require_once __DIR__ . '/materials_helpers.php'; // materials_format_size(), materials_file_icon(), materials_clean_name()
+require_once __DIR__ . '/materials_helpers.php';
+require_once __DIR__ . '/group_helpers.php'; // materials_format_size(), materials_file_icon(), materials_clean_name()
 
 /** Tamaño máximo por archivo. El hosting gratuito puede imponer un límite menor (se detecta y se avisa). */
 const PROJECT_FILE_MAX_BYTES = 10 * 1024 * 1024;   // 10 MB
@@ -221,7 +222,7 @@ function project_files_for_user(PDO $pdo, int $fileId, int $userId, string $role
     $allowed = match ($role) {
         'admin' => true,
         'teacher' => (int) $row['teacher_id'] === $userId,
-        'student' => (int) $row['student_id'] === $userId,
+        'student' => (int) $row['student_id'] === $userId || project_effective_student($pdo, (int) $row['project_id'], $userId) === (int) $row['student_id'],
         default => false,
     };
     return $allowed ? $row : null;

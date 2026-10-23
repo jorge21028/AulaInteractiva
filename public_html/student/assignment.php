@@ -6,6 +6,9 @@ require_once __DIR__ . '/../includes/word_play_helpers.php'; // límite de palab
 require_once __DIR__ . '/../includes/project_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/description_helpers.php';
+require_once __DIR__ . '/../includes/group_helpers.php';
+require_once __DIR__ . '/../includes/late_helpers.php';
+require_once __DIR__ . '/../includes/forum_helpers.php';
 
 require_role('student');
 
@@ -16,7 +19,7 @@ $assignmentId = (int) ($_GET['id'] ?? 0);
 $stmt = $pdo->prepare(
     'SELECT a.*, COALESCE(ax.due_date, a.due_date) AS due_date, ax.due_date AS ext_due_date, ax.note AS ext_note, act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, act.words_per_attempt, qz.id AS quiz_id, qz.title AS quiz_title,
         qz.time_limit_minutes, qz.max_attempts, s.name AS subject_name,
-        c.is_active AS course_active, sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id, sub.returned_at, sub.return_note
+        c.is_active AS course_active, sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id, sub.returned_at, sub.return_note, sub.late_days, sub.penalty_pct, sub.raw_score
      FROM assignments a
      LEFT JOIN activities act ON act.id = a.activity_id
      LEFT JOIN quizzes qz ON qz.id = a.quiz_id
@@ -43,7 +46,14 @@ if ((int) $assignment['course_active'] !== 1 || !assignment_has_started($assignm
 // Vencida = pasó la fecha/hora de entrega y no está entregada (salvo que el profesor la devolvió para corregir).
 $isOverdue = assignment_overdue_for_student($assignment, $assignment) || ($assignment['status'] === 'completed' && assignment_is_past_due($assignment));
 $isQuiz = $assignment['quiz_id'] !== null;
-$isCreation = $assignment['activity_id'] === null && !$isQuiz;
+$isForum = ($assignment['project_type'] ?? '') === 'foro';
+$isCreation = $assignment['activity_id'] === null && !$isQuiz && !$isForum;
+// Trabajo en grupos: el trabajo vive a nombre del representante del grupo y todos lo editan
+$groupMode = $isCreation && !empty($assignment['group_mode']);
+$myGroup = $groupMode ? group_of_student($pdo, $assignmentId, (int) $studentId) : null;
+$ownerId = $myGroup && !empty($myGroup['owner_id']) ? (int) $myGroup['owner_id'] : (int) $studentId;
+$groupBlocked = $groupMode && !$myGroup;   // el profesor todavía no lo puso en un grupo
+$inLateWindow = assignment_is_past_due($assignment) && assignment_late_window_open($assignment);
 $isWordGame = in_array($assignment['game_mode'] ?? null, WORD_GAME_MODES, true); // se juega solo, sin partida en vivo
 
 $wordAttempt = null;
@@ -71,15 +81,15 @@ if ($isQuiz) {
 // Si es un trabajo de creación y todavía está pendiente, aseguramos que
 // exista el borrador para poder enlazar directo al editor.
 $project = null;
-if ($isCreation && $assignment['status'] !== 'completed') {
+if ($isCreation && !$groupBlocked && $assignment['status'] !== 'completed') {
     if ($isOverdue) {
         // Vencida: no se crea un borrador nuevo; solo se busca el que ya tenía (para verlo en solo lectura)
         $pStmt = $pdo->prepare('SELECT * FROM student_projects WHERE assignment_id = :aid AND student_id = :sid LIMIT 1');
-        $pStmt->execute(['aid' => $assignmentId, 'sid' => $studentId]);
+        $pStmt->execute(['aid' => $assignmentId, 'sid' => $ownerId]);
         $project = $pStmt->fetch() ?: null;
     } else {
         $project = project_find_or_create_for_assignment(
-            $pdo, $assignmentId, $studentId, $assignment['project_type'], $assignment['title']
+            $pdo, $assignmentId, $ownerId, $assignment['project_type'], $assignment['title']
         );
     }
 }
@@ -121,6 +131,25 @@ require __DIR__ . '/../includes/header.php';
     <div class="card"><?= render_description($assignment['description'], $assignment['description_format'] ?? 'text') ?></div>
 <?php endif; ?>
 
+<?php if ($myGroup): ?>
+    <div class="card" style="border-color:#BFD9FF; background:#F5F9FF;">
+        <strong>👥 <?= e($myGroup['name']) ?></strong>
+        <span class="text-muted"> — trabajan juntos en un solo trabajo:</span>
+        <?= e(implode(', ', array_map(fn($m) => $m['name'], group_members($pdo, (int) $myGroup['id'])))) ?>.
+        <div class="text-muted" style="font-size:0.85rem; margin-top:4px;">Todos pueden editar el mismo trabajo; cuando uno lo entrega, queda entregado para todo el grupo y la calificación es grupal.</div>
+    </div>
+<?php endif; ?>
+<?php if (!empty($assignment['late_allowed']) && !empty($assignment['due_date']) && $assignment['status'] !== 'completed'): ?>
+    <div class="alert <?= $inLateWindow ? 'alert-error' : 'alert-success' ?>" style="<?= $inLateWindow ? 'border:2px solid #F8C9C9;' : '' ?>">
+        <?php if ($inLateWindow): ?>
+            ⏰ <strong>Estás en el período de entrega tardía.</strong>
+        <?php else: ?>
+            ⏰
+        <?php endif; ?>
+        <?= e(late_policy_text($assignment)) ?>
+    </div>
+<?php endif; ?>
+
 <?php if ($assignment['status'] === 'completed'): ?>
     <div class="card">
         <h2 style="margin-top:0;">✅ Completada</h2>
@@ -128,6 +157,12 @@ require __DIR__ . '/../includes/header.php';
             <p style="font-size:1.3rem;">
                 Calificación: <strong><?= e((string) $assignment['score']) ?> / <?= (int) $assignment['points'] ?></strong>
             </p>
+            <?php if ((float) ($assignment['penalty_pct'] ?? 0) > 0): ?>
+                <p class="text-muted" style="font-size:0.9rem;">
+                    ⏰ Entregaste <?= (int) $assignment['late_days'] ?> día(s) tarde: se descontó <?= e(rtrim(rtrim(number_format((float) $assignment['penalty_pct'], 2), '0'), '.')) ?>%
+                    <?php if ($assignment['raw_score'] !== null): ?>(nota de tu profesor: <?= e((string) $assignment['raw_score']) ?>)<?php endif; ?>.
+                </p>
+            <?php endif; ?>
         <?php else: ?>
             <p class="text-muted">Entregado. Tu profesor todavía no ha calificado este trabajo.</p>
         <?php endif; ?>
@@ -138,6 +173,9 @@ require __DIR__ . '/../includes/header.php';
             <p class="text-muted" style="font-size:0.85rem;">
                 Completada el <?= e(date('d/m/Y H:i', strtotime($assignment['completed_at']))) ?>
             </p>
+        <?php endif; ?>
+        <?php if ($isForum): ?>
+            <a class="btn btn-secondary" href="<?= e(rtrim(APP_URL, '/')) ?>/forum/view.php?id=<?= (int) $assignmentId ?>">💬 Ir al foro</a>
         <?php endif; ?>
         <?php if ($isCreation && $assignment['project_id']): ?>
             <a class="btn btn-secondary" href="<?= e(rtrim(APP_URL, '/')) ?>/editor/<?= e($editorUrlByType[$assignment['project_type']] ?? '') ?>?project_id=<?= (int) $assignment['project_id'] ?>">
@@ -160,6 +198,25 @@ require __DIR__ . '/../includes/header.php';
                 </a>
             <?php endif; ?>
         <?php endif; ?>
+    </div>
+<?php elseif ($isForum): ?>
+    <?php $fp = forum_participation($pdo, $assignmentId, (int) $studentId, $assignment); ?>
+    <div class="card" style="text-align:center;">
+        <h2 style="margin-top:0;">💬 Foro de discusión</h2>
+        <p class="text-muted">
+            Para completar esta actividad participa en el foro:
+            <strong><?= (int) $assignment['forum_min_threads'] ?></strong> tema(s) propio(s) y
+            <strong><?= (int) $assignment['forum_min_replies'] ?></strong> respuesta(s) a tus compañeros.
+        </p>
+        <p><strong>Tu avance:</strong> <?= (int) $fp['threads'] ?> tema(s) · <?= (int) $fp['replies'] ?> respuesta(s)</p>
+        <a class="btn" href="<?= e(rtrim(APP_URL, '/')) ?>/forum/view.php?id=<?= (int) $assignmentId ?>">
+            <?= $isOverdue ? 'Ver el foro (cerrado)' : 'Entrar al foro' ?>
+        </a>
+    </div>
+<?php elseif ($groupBlocked): ?>
+    <div class="card" style="text-align:center;">
+        <h2 style="margin-top:0;">👥 Trabajo en grupo</h2>
+        <p class="text-muted">Esta asignación se entrega por grupos y tu profesor todavía no te asignó a uno. Vuelve a revisar en un rato.</p>
     </div>
 <?php elseif ($isCreation && $isOverdue): ?>
     <div class="card" style="text-align:center; border-color:#F8C9C9; background:#FFF8F8;">

@@ -7,6 +7,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/project_helpers.php';
+require_once __DIR__ . '/../includes/group_helpers.php';
 
 require_role('student');
 
@@ -20,7 +21,7 @@ $stmt = $pdo->prepare(
      LEFT JOIN assignments a ON a.id = sp.assignment_id
      WHERE sp.id = :id AND sp.student_id = :sid AND sp.type = "imagenes" LIMIT 1'
 );
-$stmt->execute(['id' => $projectId, 'sid' => $studentId]);
+$stmt->execute(['id' => $projectId, 'sid' => project_effective_student($pdo, $projectId, (int) $studentId)]); // el dueño real (grupos)
 $project = $stmt->fetch();
 
 if (!$project) {

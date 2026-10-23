@@ -145,7 +145,7 @@ function space_assignment_kind(array $a): array
     if (!empty($a['quiz_title'])) {
         return ['📝', 'Cuestionario · ' . $a['quiz_title']];
     }
-    return ['✏️', PROJECT_TYPES[$a['project_type']] ?? 'Trabajo de creación'];
+    return [($a['project_type'] ?? '') === 'foro' ? '💬' : '✏️', PROJECT_TYPES[$a['project_type']] ?? 'Trabajo de creación'];
 }
 
 /** Verifica que la asignatura pertenece a un curso del profesor. Devuelve la fila con datos del curso o null. */

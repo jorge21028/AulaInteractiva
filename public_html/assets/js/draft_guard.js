@@ -238,5 +238,12 @@
             if (dirty && opts) { var st = opts.getState(); if (st) writeLocal(st, ser(st)); }
         },
         clearLocal: function () { if (opts) clearLocal(); },
+        /** Vuelca una plantilla en el editor; el ciclo de autoguardado detecta el cambio y lo guarda. */
+        applyTemplate: function (state) {
+            if (!opts || !ready) return Promise.resolve();
+            var cur = opts.getState();
+            var next = { title: (cur && cur.title !== undefined) ? cur.title : undefined, data: state.data };
+            return Promise.resolve(opts.applyState(next));
+        },
     };
 })(window);

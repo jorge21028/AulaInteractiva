@@ -7,6 +7,7 @@ define('AULA_APP', true);
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/availability_helpers.php';
+require_once __DIR__ . '/../../includes/group_helpers.php';
 
 header('Content-Type: application/json; charset=utf-8');
 require_role('student');
@@ -29,7 +30,7 @@ $file = $_FILES['media'];
 $pdo = Database::getConnection();
 if ($projectId > 0) {
     $check = $pdo->prepare('SELECT status, assignment_id FROM student_projects WHERE id = :id AND student_id = :sid');
-    $check->execute(['id' => $projectId, 'sid' => current_user_id()]);
+    $check->execute(['id' => $projectId, 'sid' => project_effective_student($pdo, $projectId, (int) current_user_id())]);
     $project = $check->fetch();
     if (!$project || $project['status'] === 'submitted') {
         json_response(['success' => false, 'message' => 'No se puede subir archivos para este trabajo.'], 400);
