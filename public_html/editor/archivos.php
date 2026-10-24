@@ -116,6 +116,7 @@ require __DIR__ . '/../includes/header.php';
 </div>
 
 <?php if (!$readOnly): ?>
+<?= paste_guard_tags(project_paste_blocked($pdo, $project)) ?>
 <script src="<?= e($base) ?>/assets/js/draft_guard.js"></script>
 <script>
 const AULA_APP_URL = <?= json_encode($base) ?>;

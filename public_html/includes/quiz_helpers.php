@@ -35,8 +35,8 @@ function quiz_start_or_resume_attempt(PDO $pdo, array $quiz, int $studentId, ?in
 
     if ($open) {
         if ($open['expires_at'] !== null && strtotime($open['expires_at']) < time()) {
-            // Se venció el tiempo sin que el estudiante entregara: se autoentrega tal cual quedó.
-            quiz_submit_attempt($pdo, (int) $open['id'], []);
+            // Se venció el tiempo sin que el estudiante entregara: se autoentrega con las respuestas que ya había marcado.
+            quiz_finalize_attempt($pdo, (int) $open['id'], true);
         } else {
             return ['attempt' => $open, 'error' => null];
         }
@@ -203,6 +203,38 @@ function quiz_register_strike(PDO $pdo, int $attemptId, int $studentId): array
         }
         throw $e;
     }
+}
+
+/**
+ * Cierra un intento enviando lo que el estudiante ya había marcado (respuestas guardadas por el autoguardado).
+ * $auto = true cuando se cierra por fin de tiempo: la entrega queda marcada como "enviada automáticamente".
+ */
+function quiz_finalize_attempt(PDO $pdo, int $attemptId, bool $auto): array
+{
+    $stmt = $pdo->prepare('SELECT * FROM quiz_attempts WHERE id = :id');
+    $stmt->execute(['id' => $attemptId]);
+    $attempt = $stmt->fetch();
+    if (!$attempt || $attempt['status'] === 'submitted') {
+        return $attempt ?: [];
+    }
+
+    $draft = json_decode((string) ($attempt['draft_answers'] ?? ''), true);
+    $answers = [];
+    foreach (is_array($draft) ? $draft : [] as $qid => $oid) {
+        if ((int) $oid > 0) {
+            $answers[(int) $qid] = (int) $oid;
+        }
+    }
+
+    $result = quiz_submit_attempt($pdo, $attemptId, $answers);
+    if ($auto) {
+        $pdo->prepare('UPDATE quiz_attempts SET auto_submitted = 1 WHERE id = :id')->execute(['id' => $attemptId]);
+        if (!empty($attempt['assignment_id'])) {
+            $pdo->prepare('UPDATE submissions SET auto_submitted = 1 WHERE assignment_id = :a AND student_id = :s')
+                ->execute(['a' => $attempt['assignment_id'], 's' => $attempt['student_id']]);
+        }
+    }
+    return $result;
 }
 
 /**

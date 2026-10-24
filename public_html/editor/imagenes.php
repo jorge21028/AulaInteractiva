@@ -102,6 +102,7 @@ require __DIR__ . '/../includes/header.php';
 
 <?php if (!$isSubmitted): ?>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/image_upload.js"></script>
+<?= paste_guard_tags(project_paste_blocked($pdo, $project)) ?>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/draft_guard.js"></script>
 <script>
 const AULA_APP_URL = <?= json_encode(rtrim(APP_URL, '/')) ?>;

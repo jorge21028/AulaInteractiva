@@ -1,4 +1,14 @@
 <?php
+// Envío automático al terminar el tiempo (Fase 23): barrido perezoso, como mucho una vez por minuto
+if (function_exists('is_logged_in') && is_logged_in()) {
+    try {
+        require_once __DIR__ . '/autosubmit_helpers.php';
+        autosubmit_maybe_sweep(Database::getConnection());
+    } catch (Throwable $e) {
+        error_log('autosubmit header: ' . $e->getMessage());
+    }
+}
+
 if (!defined('AULA_APP')) {
     http_response_code(403);
     exit('Acceso directo no permitido.');

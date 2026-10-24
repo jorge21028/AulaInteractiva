@@ -264,3 +264,13 @@ Posibles ampliaciones futuras: fichas de estudio, preguntas con audio/video como
 - **💬 Foros tipo Moodle** (`forum/view.php`, `includes/forum_helpers.php`): nuevo tipo de trabajo "Foro de discusión". Temas y respuestas, modo general o pregunta-respuesta, mínimos de temas/respuestas para completar, fijar/cerrar/borrar/editar, y tabla de participación para el profesor.
 - **Base de datos:** ejecutar `database/schema_fase22_ia_plantillas_grupos_foro.sql` (columnas nuevas en `assignments` y `submissions`; tablas `assignment_groups`, `assignment_group_members` y `forum_posts`). Requiere MariaDB (`ADD COLUMN IF NOT EXISTS`).
 
+## Fase 23 — Envío automático al terminar el tiempo y bloqueo de "pegar"
+
+- **⏱️ Envío automático** (`includes/autosubmit_helpers.php`): cuando se acaba el tiempo, lo que el estudiante llevaba se envía solo y queda marcado como "Enviada automáticamente" (para el profesor y para el estudiante).
+  - **Cuestionarios:** las respuestas se guardan en el servidor mientras el estudiante contesta (`api/quiz/save_progress.php`, columna `quiz_attempts.draft_answers`). Si vence el cronómetro del intento (o la fecha de entrega, en cuestionarios sin cronómetro), el intento se cierra y se califica con lo ya marcado. Antes se enviaba en blanco.
+  - **Juegos de palabras** (ahorcado, crucigrama, sopa de letras, emparejar): al vencer la fecha se califica lo que alcanzó a resolver.
+  - **Trabajos de creación en borrador:** al vencer la fecha (más los días de gracia si permite entregas tardías, con su penalización máxima) se entregan tal cual estaban. Los borradores vacíos o intactos desde la plantilla no se envían, y los trabajos devueltos para corregir tampoco.
+  - Como el hosting gratuito no tiene tareas programadas, el barrido es "perezoso": se dispara al abrir cualquier página (máx. 1 vez por minuto) y de inmediato en la pantalla del profesor y del estudiante afectado. Opcional: definir `CRON_KEY` en `config/env.php` y llamar `api/cron/sweep.php?key=...` cada 5 minutos con un cron gratuito.
+- **🔒 Bloquear "pegar"** (`assets/js/paste_guard.js`, columna `assignments.block_paste`): en las actividades de creación el profesor puede bloquear Ctrl+V / Cmd+V / Shift+Insert, "Pegar" del clic derecho o del teléfono, y arrastrar texto a un campo. Se activa al crear/editar la asignación o con el botón **🔒/🔓** de la pantalla de la asignación, y funciona en resumen, tabla, infografía, mapa mental, presentación, imágenes, archivos y foro. Es una barrera contra el "copiar y pegar" fácil, no una seguridad infalible.
+- **Base de datos:** ejecutar `database/schema_fase23_autoenvio_pegar.sql`.
+

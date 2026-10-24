@@ -86,6 +86,7 @@ require __DIR__ . '/../includes/header.php';
 </div>
 
 <?php if (!$isSubmitted): ?>
+<?= paste_guard_tags(project_paste_blocked($pdo, $project)) ?>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/draft_guard.js"></script>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/template_picker.js"></script>
 <script>

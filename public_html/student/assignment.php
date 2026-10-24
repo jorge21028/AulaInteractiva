@@ -9,6 +9,7 @@ require_once __DIR__ . '/../includes/description_helpers.php';
 require_once __DIR__ . '/../includes/group_helpers.php';
 require_once __DIR__ . '/../includes/late_helpers.php';
 require_once __DIR__ . '/../includes/forum_helpers.php';
+require_once __DIR__ . '/../includes/autosubmit_helpers.php';
 
 require_role('student');
 
@@ -16,10 +17,12 @@ $pdo = Database::getConnection();
 $studentId = current_user_id();
 $assignmentId = (int) ($_GET['id'] ?? 0);
 
+autosubmit_sweep($pdo, $assignmentId, (int) $studentId);   // si se acabó el tiempo, lo que llevaba se envía antes de mostrar la página
+
 $stmt = $pdo->prepare(
     'SELECT a.*, COALESCE(ax.due_date, a.due_date) AS due_date, ax.due_date AS ext_due_date, ax.note AS ext_note, act.id AS activity_id, act.title AS activity_title, act.game_mode, act.allow_repeat, act.words_per_attempt, qz.id AS quiz_id, qz.title AS quiz_title,
         qz.time_limit_minutes, qz.max_attempts, s.name AS subject_name,
-        c.is_active AS course_active, sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id, sub.returned_at, sub.return_note, sub.late_days, sub.penalty_pct, sub.raw_score
+        c.is_active AS course_active, sub.id AS submission_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.project_id, sub.returned_at, sub.return_note, sub.late_days, sub.penalty_pct, sub.raw_score, sub.auto_submitted
      FROM assignments a
      LEFT JOIN activities act ON act.id = a.activity_id
      LEFT JOIN quizzes qz ON qz.id = a.quiz_id
@@ -157,6 +160,9 @@ require __DIR__ . '/../includes/header.php';
             <p style="font-size:1.3rem;">
                 Calificación: <strong><?= e((string) $assignment['score']) ?> / <?= (int) $assignment['points'] ?></strong>
             </p>
+            <?php if (!empty($assignment['auto_submitted'])): ?>
+                <p class="text-muted" style="font-size:0.9rem;">⏱️ Se acabó el tiempo y esta actividad se envió automáticamente con lo que habías alcanzado a hacer.</p>
+            <?php endif; ?>
             <?php if ((float) ($assignment['penalty_pct'] ?? 0) > 0): ?>
                 <p class="text-muted" style="font-size:0.9rem;">
                     ⏰ Entregaste <?= (int) $assignment['late_days'] ?> día(s) tarde: se descontó <?= e(rtrim(rtrim(number_format((float) $assignment['penalty_pct'], 2), '0'), '.')) ?>%

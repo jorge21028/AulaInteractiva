@@ -18,6 +18,7 @@ function assignment_extras_defaults(?array $a = null): array
         'late_allowed' => (int) ($a['late_allowed'] ?? 0),
         'late_penalty_pct' => (int) ($a['late_penalty_pct'] ?? 10),
         'late_max_days' => (int) ($a['late_max_days'] ?? 3),
+        'block_paste' => (int) ($a['block_paste'] ?? 0),
         'group_mode' => (int) ($a['group_mode'] ?? 0),
         'group_size' => (int) ($a['group_size'] ?? 3),
         'template_key' => (string) ($a['template_key'] ?? ''),
@@ -45,6 +46,7 @@ function assignment_extras_from_post(array $post, string $projectType): array
         $errors[] = 'Los días máximos de entrega tardía deben estar entre 1 y 60.';
     }
 
+    $x['block_paste'] = !empty($post['block_paste']) ? 1 : 0;
     $x['group_mode'] = (!$isForum && !empty($post['group_mode'])) ? 1 : 0;
     $x['group_size'] = max(2, min(12, (int) ($post['group_size'] ?? 3)));
 
@@ -69,12 +71,12 @@ function assignment_extras_from_post(array $post, string $projectType): array
 function assignment_extras_save(PDO $pdo, int $assignmentId, array $x, bool $includeGroup = true): void
 {
     $sql = 'UPDATE assignments SET late_allowed = :la, late_penalty_pct = :lp, late_max_days = :lm, template_key = :tk,
-                   forum_mode = :fm, forum_min_threads = :ft, forum_min_replies = :fr, forum_students_start = :fs'
+                   forum_mode = :fm, forum_min_threads = :ft, forum_min_replies = :fr, forum_students_start = :fs, block_paste = :bp'
          . ($includeGroup ? ', group_mode = :gm, group_size = :gs' : '') . ' WHERE id = :id';
     $params = [
         'la' => $x['late_allowed'], 'lp' => $x['late_penalty_pct'], 'lm' => $x['late_max_days'], 'tk' => $x['template_key'] ?: null,
         'fm' => $x['forum_mode'], 'ft' => $x['forum_min_threads'], 'fr' => $x['forum_min_replies'], 'fs' => $x['forum_students_start'],
-        'id' => $assignmentId,
+        'bp' => $x['block_paste'], 'id' => $assignmentId,
     ];
     if ($includeGroup) {
         $params['gm'] = $x['group_mode'];
@@ -113,6 +115,13 @@ function assignment_extras_render(array $x, ?string $fixedType = null, bool $loc
                 <input type="checkbox" name="forum_students_start" value="1" style="width:auto;" <?= $x['forum_students_start'] ? 'checked' : '' ?>> Los estudiantes pueden abrir temas nuevos
             </label>
             <p class="text-muted" style="font-size:0.8rem; margin:4px 0 0;">El foro se marca como completado cuando el estudiante llega al mínimo. Tú calificas su participación.</p>
+        </div>
+
+        <div style="margin-top:10px;">
+            <label style="display:flex; gap:8px; align-items:center; font-weight:600;">
+                <input type="checkbox" name="block_paste" value="1" style="width:auto;" <?= $x['block_paste'] ? 'checked' : '' ?>> 🔒 Bloquear "pegar" (Ctrl+V y clic derecho)
+            </label>
+            <p class="text-muted" style="font-size:0.8rem; margin:2px 0 0;">Los estudiantes tendrán que escribir con sus propias palabras. Puedes activarlo o desactivarlo cuando quieras, también desde la pantalla de la asignación.</p>
         </div>
 
         <div id="extras-template" style="margin-top:10px;">

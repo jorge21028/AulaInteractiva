@@ -99,9 +99,11 @@ function group_propagate_submission(PDO $pdo, int $assignmentId, int $ownerId, i
         return;
     }
     require_once __DIR__ . '/late_helpers.php';
-    $ownerSub = $pdo->prepare('SELECT completed_at FROM submissions WHERE assignment_id = :aid AND student_id = :sid');
+    $ownerSub = $pdo->prepare('SELECT completed_at, auto_submitted FROM submissions WHERE assignment_id = :aid AND student_id = :sid');
     $ownerSub->execute(['aid' => $assignmentId, 'sid' => $ownerId]);
-    $completedAt = $ownerSub->fetchColumn() ?: now_datetime();
+    $ownerRow = $ownerSub->fetch() ?: [];
+    $completedAt = $ownerRow['completed_at'] ?? now_datetime();
+    $autoFlag = (int) ($ownerRow['auto_submitted'] ?? 0);
 
     foreach ($mates as $sid) {
         $q = $pdo->prepare('SELECT id, reviewed_at FROM submissions WHERE assignment_id = :aid AND student_id = :sid');
@@ -116,6 +118,8 @@ function group_propagate_submission(PDO $pdo, int $assignmentId, int $ownerId, i
         } else {
             $pdo->prepare('UPDATE submissions SET project_id = :pid WHERE id = :id')->execute(['pid' => $projectId, 'id' => $row['id']]);
         }
+        $pdo->prepare('UPDATE submissions SET auto_submitted = :a WHERE assignment_id = :aid AND student_id = :sid')
+            ->execute(['a' => $autoFlag, 'aid' => $assignmentId, 'sid' => $sid]);
         late_stamp_submission($pdo, $assignmentId, $sid);
     }
 }

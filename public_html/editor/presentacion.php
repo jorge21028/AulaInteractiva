@@ -141,6 +141,7 @@ require __DIR__ . '/../includes/header.php';
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/image_upload.js"></script>
+<?= paste_guard_tags(project_paste_blocked($pdo, $project)) ?>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/draft_guard.js"></script>
 <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/template_picker.js"></script>
 <script>

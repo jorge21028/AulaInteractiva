@@ -7,6 +7,7 @@ require_once __DIR__ . '/../includes/project_files_helpers.php';
 require_once __DIR__ . '/../includes/late_helpers.php';
 require_once __DIR__ . '/../includes/group_helpers.php';
 require_once __DIR__ . '/../includes/forum_helpers.php';
+require_once __DIR__ . '/../includes/autosubmit_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/description_helpers.php';
 require_once __DIR__ . '/../includes/submission_admin_helpers.php';
@@ -78,6 +79,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['
     } else {
         $errors[] = $msgAction;
     }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_paste' && !empty($assignment['project_type'])) {
+    csrf_verify($_POST['csrf_token'] ?? null);
+    $newVal = empty($assignment['block_paste']) ? 1 : 0;
+    $pdo->prepare('UPDATE assignments SET block_paste = :v WHERE id = :id AND teacher_id = :tid')
+        ->execute(['v' => $newVal, 'id' => $assignmentId, 'tid' => $teacherId]);
+    $assignment['block_paste'] = $newVal;
+    $notice = $newVal ? '🔒 Pegar bloqueado: los estudiantes no podrán pegar en esta actividad.' : '🔓 Pegar permitido de nuevo en esta actividad.';
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_grades_bulk') {
@@ -189,11 +199,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     }
 }
 
+autosubmit_sweep($pdo, $assignmentId);   // lo vencido se envía antes de mostrar la lista
 $rosterStmt = $pdo->prepare(
     'SELECT sub.id AS submission_id, sub.student_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id, sub.quiz_attempt_id,
         qa.tab_switches, wga.status AS wg_status, wga.correct_count AS wg_correct, wga.total_count AS wg_total,
         wga.state_json AS wg_state, wga.updated_at AS wg_updated_at,
-        sub.returned_at, sub.return_note, sub.game_id, sub.raw_score, sub.penalty_pct, sub.late_days, gg.name AS group_name,
+        sub.returned_at, sub.return_note, sub.game_id, sub.raw_score, sub.penalty_pct, sub.late_days, sub.auto_submitted, gg.name AS group_name,
         (SELECT COUNT(*) FROM quiz_attempts qa4 WHERE qa4.assignment_id = sub.assignment_id AND qa4.student_id = sub.student_id AND qa4.status <> \'in_progress\') AS quiz_done,
         (SELECT COUNT(*) FROM quiz_attempts qa3 WHERE qa3.assignment_id = sub.assignment_id AND qa3.student_id = sub.student_id) AS quiz_attempts_total,
         sp.id AS draft_project_id, sp.status AS project_status, sp.type AS draft_type, sp.data_json AS draft_data,
@@ -413,6 +424,14 @@ require __DIR__ . '/../includes/header.php';
     <?php if ($isGroupAssignment): ?>
         <a class="btn btn-secondary" href="groups.php?id=<?= (int) $assignmentId ?>">👥 Armar grupos</a>
     <?php endif; ?>
+    <?php if (!empty($assignment['project_type'])): ?>
+        <form method="post" style="display:inline;">
+            <?php csrf_field(); ?><input type="hidden" name="action" value="toggle_paste">
+            <button type="submit" class="btn btn-secondary" title="Impide pegar texto (Ctrl+V y clic derecho) mientras los estudiantes trabajan">
+                <?= !empty($assignment['block_paste']) ? '🔒 Pegar bloqueado — permitir' : '🔓 Pegar permitido — bloquear' ?>
+            </button>
+        </form>
+    <?php endif; ?>
     <?php if ($isForumAssignment): ?>
         <a class="btn btn-secondary" href="../forum/view.php?id=<?= (int) $assignmentId ?>">💬 Abrir el foro</a>
     <?php endif; ?>
@@ -535,6 +554,9 @@ require __DIR__ . '/../includes/header.php';
                             <?php if ($isForumAssignment): $fp = $forumByStudent[(int) $r['student_id']] ?? ['threads' => 0, 'replies' => 0]; ?>
                                 <div style="font-size:0.85rem;">💬 <?= (int) $fp['threads'] ?> tema(s) · <?= (int) $fp['replies'] ?> respuesta(s)
                                     · <a href="../forum/view.php?id=<?= (int) $assignmentId ?>&amp;student=<?= (int) $r['student_id'] ?>">Ver participación &rarr;</a></div>
+                            <?php endif; ?>
+                            <?php if (!empty($r['auto_submitted'])): ?>
+                                <div style="font-size:0.85rem; color:#6D28D9;" title="Se acabó el tiempo y el sistema envió lo que el estudiante llevaba">⏱️ Enviada automáticamente al acabar el tiempo</div>
                             <?php endif; ?>
                             <?php if ((float) ($r['penalty_pct'] ?? 0) > 0): ?>
                                 <div style="font-size:0.85rem; color:#B45309;">⏰ Entregó <?= (int) $r['late_days'] ?> día(s) tarde (−<?= e(rtrim(rtrim(number_format((float) $r['penalty_pct'], 2), '0'), '.')) ?>%)</div>

@@ -114,6 +114,72 @@ function wga_complete(PDO $pdo, array $assignment, int $attemptId, int $studentI
 }
 
 /**
+ * Fin de tiempo (Fase 23): cierra un intento que el estudiante dejó a medias y lo califica con lo que alcanzó a hacer
+ * (palabras resueltas, parejas, casillas correctas...). Devuelve true si cerró el intento.
+ */
+function wga_autocomplete_attempt(PDO $pdo, array $attemptRow): bool
+{
+    $assignment = wga_load_assignment($pdo, (int) $attemptRow['assignment_id'], (int) $attemptRow['student_id']);
+    if (!$assignment) {
+        return false;
+    }
+    $bank = word_activity_words($pdo, (int) $assignment['activity_id']);
+    if (empty($bank)) {
+        return false;
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $attempt = wga_lock_attempt($pdo, (int) $attemptRow['id']);
+        if (!$attempt || $attempt['status'] !== 'in_progress') {
+            $pdo->rollBack();
+            return false;
+        }
+        $attempt = wga_ensure_selection($pdo, $assignment, $attempt, $bank);
+        $mode = $assignment['game_mode'];
+        if ($mode === 'emparejar' || $mode === 'sopa_letras') {
+            $attempt = wga_ensure_seed($pdo, $attempt);
+        }
+        $words = wga_attempt_bank($bank, $attempt);
+        $state = word_game_decode_answer($attempt['state_json']);
+
+        switch ($mode) {
+            case 'ahorcado':
+                [$correct] = wga_hangman_counts($words, $state);
+                $total = count($words);
+                break;
+            case 'crucigrama':
+                $layout = crossword_build_layout($words);
+                $grade = crossword_grade($layout, crossword_sanitize_cells($layout, $state['cells'] ?? []));
+                [$correct, $total] = [$grade['correct'], $grade['total']];
+                break;
+            case 'sopa_letras':
+                $correct = is_array($state['found'] ?? null) ? count($state['found']) : 0;
+                $total = count($words);
+                break;
+            case 'emparejar':
+                [$correct, , $total] = matching_counts($words, $state);
+                break;
+            default:
+                $pdo->rollBack();
+                return false;
+        }
+
+        wga_complete($pdo, $assignment, (int) $attempt['id'], (int) $attempt['student_id'], (int) $correct, (int) $total);
+        $pdo->prepare('UPDATE submissions SET auto_submitted = 1 WHERE assignment_id = :a AND student_id = :s')
+            ->execute(['a' => $assignment['id'], 's' => $attempt['student_id']]);
+        $pdo->commit();
+        return true;
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('wga_autocomplete_attempt: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
  * Reinicia el intento (solo si la actividad permite repetir). La mejor nota se conserva en la entrega.
  * Se recuerdan las palabras del intento anterior ("last") para que el nuevo sorteo prefiera otras distintas.
  */

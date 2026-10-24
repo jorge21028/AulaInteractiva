@@ -420,8 +420,14 @@ function project_save(PDO $pdo, int $projectId, int $studentId, array $data, ?st
  * correspondiente en "submissions", en estado 'completed' sin calificar
  * todavía (la calificación de trabajos abiertos la pone el profesor).
  */
-function project_submit(PDO $pdo, int $projectId, int $studentId): bool
+/**
+ * Entrega un trabajo. $systemAt != null = envío AUTOMÁTICO por fin de tiempo (Fase 23): no se revisa el bloqueo por
+ * fecha y la entrega queda registrada a esa hora (la fecha límite), marcada como "enviada automáticamente".
+ */
+function project_submit(PDO $pdo, int $projectId, int $studentId, ?string $systemAt = null): bool
 {
+    $at = $systemAt ?? now_datetime();
+    $auto = $systemAt !== null ? 1 : 0;
     $stmt = $pdo->prepare('SELECT * FROM student_projects WHERE id = :id AND student_id = :sid');
     $stmt->execute(['id' => $projectId, 'sid' => $studentId]);
     $project = $stmt->fetch();
@@ -429,7 +435,7 @@ function project_submit(PDO $pdo, int $projectId, int $studentId): bool
     if (!$project || $project['status'] === 'submitted') {
         return false;
     }
-    if (assignment_lock_reason($pdo, $project['assignment_id'] ? (int) $project['assignment_id'] : null, $studentId) !== null) {
+    if ($systemAt === null && assignment_lock_reason($pdo, $project['assignment_id'] ? (int) $project['assignment_id'] : null, $studentId) !== null) {
         return false;
     }
     if ($project['type'] === 'archivos') {
@@ -443,7 +449,7 @@ function project_submit(PDO $pdo, int $projectId, int $studentId): bool
     try {
         $pdo->prepare(
             "UPDATE student_projects SET status = 'submitted', submitted_at = :submitted_at, updated_at = :updated_at WHERE id = :id"
-        )->execute(['submitted_at' => now_datetime(), 'updated_at' => now_datetime(), 'id' => $projectId]);
+        )->execute(['submitted_at' => $at, 'updated_at' => $at, 'id' => $projectId]);
 
         if ($project['assignment_id']) {
             $subStmt = $pdo->prepare(
@@ -458,19 +464,19 @@ function project_submit(PDO $pdo, int $projectId, int $studentId): bool
                     // Al reenviar un trabajo devuelto, deja de estar "devuelto".
                     $pdo->prepare(
                         "UPDATE submissions SET status = 'completed', project_id = :pid, completed_at = :now,
-                                returned_at = NULL, return_note = NULL WHERE id = :id"
-                    )->execute(['pid' => $projectId, 'now' => now_datetime(), 'id' => $submission['id']]);
+                                returned_at = NULL, return_note = NULL, auto_submitted = :auto WHERE id = :id"
+                    )->execute(['pid' => $projectId, 'now' => $at, 'auto' => $auto, 'id' => $submission['id']]);
                 } else {
                     $pdo->prepare('UPDATE submissions SET project_id = :pid WHERE id = :id')
                         ->execute(['pid' => $projectId, 'id' => $submission['id']]);
                 }
             } else {
                 $pdo->prepare(
-                    "INSERT INTO submissions (assignment_id, student_id, project_id, status, completed_at, created_at)
-                     VALUES (:aid, :sid, :pid, 'completed', :completed_at, :created_at)"
+                    "INSERT INTO submissions (assignment_id, student_id, project_id, status, completed_at, created_at, auto_submitted)
+                     VALUES (:aid, :sid, :pid, 'completed', :completed_at, :created_at, :auto)"
                 )->execute([
                     'aid' => $project['assignment_id'], 'sid' => $studentId, 'pid' => $projectId,
-                    'completed_at' => now_datetime(), 'created_at' => now_datetime(),
+                    'completed_at' => $at, 'created_at' => now_datetime(), 'auto' => $auto,
                 ]);
             }
         }
@@ -492,4 +498,29 @@ function project_submit(PDO $pdo, int $projectId, int $studentId): bool
         error_log('project_submit error: ' . $e->getMessage());
         return false;
     }
+}
+
+/** ¿El profesor desactivó el pegado (Ctrl+V / clic derecho) en la asignación de este trabajo? */
+function project_paste_blocked(PDO $pdo, array $project): bool
+{
+    if (empty($project['assignment_id'])) {
+        return false;
+    }
+    try {
+        $stmt = $pdo->prepare('SELECT block_paste FROM assignments WHERE id = :id');
+        $stmt->execute(['id' => $project['assignment_id']]);
+        return (int) $stmt->fetchColumn() === 1;
+    } catch (Throwable $e) {
+        return false; // columna aún no creada
+    }
+}
+
+/** Etiquetas <script> que activan el bloqueo de pegar en una página (vacío si no está activado). */
+function paste_guard_tags(bool $blocked): string
+{
+    if (!$blocked) {
+        return '';
+    }
+    return '<script>window.AULA_BLOCK_PASTE = true;</script>' . "\n"
+        . '<script src="' . e(rtrim(APP_URL, '/')) . '/assets/js/paste_guard.js"></script>';
 }

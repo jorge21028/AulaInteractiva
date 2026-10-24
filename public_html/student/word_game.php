@@ -15,6 +15,9 @@ $pdo = Database::getConnection();
 $studentId = current_user_id();
 $assignmentId = (int) ($_GET['assignment_id'] ?? 0);
 
+require_once __DIR__ . '/../includes/autosubmit_helpers.php';
+autosubmit_sweep($pdo, $assignmentId, (int) $studentId);   // si venció la fecha, lo que llevaba se califica y se envía
+
 $assignment = wga_load_assignment($pdo, $assignmentId, $studentId);
 if (!$assignment) {
     http_response_code(404);

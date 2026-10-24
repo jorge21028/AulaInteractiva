@@ -5,6 +5,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/quiz_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/description_helpers.php';
+require_once __DIR__ . '/../includes/autosubmit_helpers.php';
 
 require_role('student');
 
@@ -72,6 +73,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submi
         $attempt = quiz_submit_attempt($pdo, $attemptId, $answers);
     }
 }
+
+// Si se acabó el tiempo (o la fecha de entrega) con un intento abierto, se envía con las respuestas ya guardadas.
+// Va DESPUÉS de procesar una entrega normal para no adelantarse a lo que el navegador envía justo al acabar el tiempo.
+autosubmit_sweep($pdo, $assignmentId, (int) $studentId);
 
 // ---- ¿Hay un intento recién entregado (para mostrar resultado) o hay que iniciar/retomar uno? ----
 $submittedAttempt = null;
@@ -255,6 +260,7 @@ require __DIR__ . '/../includes/header.php';
             <input type="hidden" name="action" value="submit_attempt">
             <input type="hidden" name="attempt_id" value="<?= (int) $activeAttempt['id'] ?>">
 
+            <?php $draftAnswers = json_decode((string) ($activeAttempt['draft_answers'] ?? ''), true) ?: []; ?>
             <?php foreach ($questions as $i => $q): ?>
                 <div class="card" style="margin-bottom:12px;">
                     <strong><?= $i + 1 ?>. <?= e($q['statement']) ?></strong>
@@ -262,7 +268,7 @@ require __DIR__ . '/../includes/header.php';
                     <div style="margin-top:10px;">
                         <?php foreach ($q['options'] as $o): ?>
                             <label style="display:flex; align-items:center; gap:8px; font-weight:400; padding:6px 0;">
-                                <input type="radio" name="answers[<?= (int) $q['id'] ?>]" value="<?= (int) $o['id'] ?>" style="width:auto;">
+                                <input type="radio" name="answers[<?= (int) $q['id'] ?>]" value="<?= (int) $o['id'] ?>" style="width:auto;" <?= (int) ($draftAnswers[(int) $q['id']] ?? 0) === (int) $o['id'] ? 'checked' : '' ?>>
                                 <?= e($o['text']) ?>
                             </label>
                         <?php endforeach; ?>
@@ -287,6 +293,27 @@ require __DIR__ . '/../includes/header.php';
         const quizForm = document.getElementById('quiz-form');
         const timerEl = document.getElementById('quiz-timer');
         const strikesEl = document.getElementById('quiz-strikes');
+
+        // ---------- Autoguardado de respuestas: si se acaba el tiempo o se cierra la página, se envía lo ya marcado ----------
+        const progressUrl = '<?= e(rtrim(APP_URL, '/')) ?>/api/quiz/save_progress.php';
+        let progressTimer = null;
+        function collectAnswers() {
+            const out = {};
+            quizForm.querySelectorAll('input[type=radio]:checked').forEach(r => {
+                const m = /answers\[(\d+)\]/.exec(r.name);
+                if (m) out[m[1]] = parseInt(r.value, 10);
+            });
+            return out;
+        }
+        function saveProgress(keep) {
+            try {
+                fetch(progressUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', keepalive: !!keep,
+                    body: JSON.stringify({ attempt_id: attemptId, answers: collectAnswers(), csrf_token: csrfToken }) }).catch(() => {});
+            } catch (e) { /* sin conexión: se reintenta en el próximo cambio */ }
+        }
+        quizForm.addEventListener('change', () => { clearTimeout(progressTimer); progressTimer = setTimeout(() => saveProgress(false), 1000); });
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveProgress(true); });
+        window.addEventListener('pagehide', () => saveProgress(true));
 
         // El tiempo se maneja con segundos restantes que calcula el servidor (no depende
         // de la zona horaria ni del reloj del dispositivo del estudiante).

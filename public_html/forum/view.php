@@ -12,6 +12,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/description_helpers.php';
 require_once __DIR__ . '/../includes/forum_helpers.php';
+require_once __DIR__ . '/../includes/project_helpers.php';
 
 require_role(['student', 'teacher', 'admin']);
 
@@ -292,4 +293,5 @@ require __DIR__ . '/../includes/header.php';
         </div>
     <?php endif; ?>
 <?php endif; ?>
+<?php if ($role === 'student') { echo paste_guard_tags(!empty($forum['block_paste'])); } ?>
 <?php require __DIR__ . '/../includes/footer.php'; ?>
