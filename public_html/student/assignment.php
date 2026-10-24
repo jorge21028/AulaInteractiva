@@ -156,13 +156,13 @@ require __DIR__ . '/../includes/header.php';
 <?php if ($assignment['status'] === 'completed'): ?>
     <div class="card">
         <h2 style="margin-top:0;">✅ Completada</h2>
+        <?php if (!empty($assignment['auto_submitted'])): ?>
+        <p class="text-muted" style="font-size:0.9rem;">⏱️ Se acabó el tiempo y <?= $isCreation ? 'tu trabajo se envió automáticamente como borrador (puede estar incompleto)' : 'esta actividad se envió automáticamente con lo que habías alcanzado a hacer' ?>.</p>
+        <?php endif; ?>
         <?php if ($assignment['score'] !== null): ?>
             <p style="font-size:1.3rem;">
                 Calificación: <strong><?= e((string) $assignment['score']) ?> / <?= (int) $assignment['points'] ?></strong>
             </p>
-            <?php if (!empty($assignment['auto_submitted'])): ?>
-                <p class="text-muted" style="font-size:0.9rem;">⏱️ Se acabó el tiempo y esta actividad se envió automáticamente con lo que habías alcanzado a hacer.</p>
-            <?php endif; ?>
             <?php if ((float) ($assignment['penalty_pct'] ?? 0) > 0): ?>
                 <p class="text-muted" style="font-size:0.9rem;">
                     ⏰ Entregaste <?= (int) $assignment['late_days'] ?> día(s) tarde: se descontó <?= e(rtrim(rtrim(number_format((float) $assignment['penalty_pct'], 2), '0'), '.')) ?>%

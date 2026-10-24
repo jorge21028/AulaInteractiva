@@ -13,7 +13,8 @@ $projectId = (int) ($_GET['id'] ?? 0);
 
 // Verificar que el trabajo pertenece a una asignación de este profesor
 $stmt = $pdo->prepare(
-    'SELECT sp.*, u.name AS student_name, a.title AS assignment_title, a.teacher_id
+    'SELECT sp.*, u.name AS student_name, a.title AS assignment_title, a.teacher_id,
+            (SELECT s.auto_submitted FROM submissions s WHERE s.assignment_id = sp.assignment_id AND s.student_id = sp.student_id LIMIT 1) AS auto_submitted
      FROM student_projects sp
      INNER JOIN users u ON u.id = sp.student_id
      LEFT JOIN assignments a ON a.id = sp.assignment_id
@@ -46,6 +47,14 @@ require __DIR__ . '/../includes/header.php';
         · última edición: <?= e(date('d/m/Y H:i', strtotime($project['updated_at']))) ?>
     <?php endif; ?>
 </p>
+
+<?php if ($project['status'] === 'submitted' && !empty($project['auto_submitted'])): ?>
+    <div class="alert alert-error" style="border:2px solid #F59E0B; background:#FFF8E6; color:#92400E; margin-bottom:16px;">
+        <strong>⚠️ TRABAJO INCOMPLETO — BORRADOR</strong><br>
+        <?= e($project['student_name']) ?> no entregó este trabajo: se envió automáticamente al acabarse el tiempo con lo que tenía hecho,
+        así que puede estar incompleto.
+    </div>
+<?php endif; ?>
 
 <div class="no-print" style="margin-bottom:16px;">
     <?php if (in_array($project['type'], PROJECT_CANVAS_TYPES, true)): ?>

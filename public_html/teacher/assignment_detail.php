@@ -556,7 +556,11 @@ require __DIR__ . '/../includes/header.php';
                                     · <a href="../forum/view.php?id=<?= (int) $assignmentId ?>&amp;student=<?= (int) $r['student_id'] ?>">Ver participación &rarr;</a></div>
                             <?php endif; ?>
                             <?php if (!empty($r['auto_submitted'])): ?>
-                                <div style="font-size:0.85rem; color:#6D28D9;" title="Se acabó el tiempo y el sistema envió lo que el estudiante llevaba">⏱️ Enviada automáticamente al acabar el tiempo</div>
+                                <?php if ($r['project_id']): ?>
+                                    <div style="font-size:0.85rem; font-weight:700; color:#B45309;" title="El estudiante no la entregó: se envió sola al acabarse el tiempo">⚠️ Trabajo incompleto / borrador — enviado automáticamente</div>
+                                <?php else: ?>
+                                    <div style="font-size:0.85rem; color:#6D28D9;" title="Se acabó el tiempo y el sistema envió lo que el estudiante llevaba">⏱️ Enviada automáticamente al acabar el tiempo</div>
+                                <?php endif; ?>
                             <?php endif; ?>
                             <?php if ((float) ($r['penalty_pct'] ?? 0) > 0): ?>
                                 <div style="font-size:0.85rem; color:#B45309;">⏰ Entregó <?= (int) $r['late_days'] ?> día(s) tarde (−<?= e(rtrim(rtrim(number_format((float) $r['penalty_pct'], 2), '0'), '.')) ?>%)</div>
