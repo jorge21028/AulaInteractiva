@@ -40,14 +40,26 @@ foreach ($subjects as $sj) {
 
 // Actividades publicadas del profesor (solo esas se pueden asignar)
 $actStmt = $pdo->prepare(
-    "SELECT id, title, subject_id, game_mode FROM activities WHERE teacher_id = :teacher_id AND status = 'published' ORDER BY title"
+    "SELECT a.id, a.title, a.subject_id, a.game_mode, a.difficulty, a.time_per_question, a.created_at,
+            s.name AS subject_name, c.name AS course_name,
+            (SELECT COUNT(*) FROM activity_questions q WHERE q.activity_id = a.id) AS item_count,
+            (SELECT COUNT(*) FROM assignments x WHERE x.activity_id = a.id) AS used_count,
+            (SELECT MAX(x.created_at) FROM assignments x WHERE x.activity_id = a.id) AS last_used
+     FROM activities a INNER JOIN subjects s ON s.id = a.subject_id INNER JOIN courses c ON c.id = s.course_id
+     WHERE a.teacher_id = :teacher_id AND a.status = 'published' ORDER BY a.created_at DESC"
 );
 $actStmt->execute(['teacher_id' => $teacherId]);
 $activities = $actStmt->fetchAll();
 
 // Cuestionarios publicados del profesor
 $quizStmt = $pdo->prepare(
-    "SELECT id, title, subject_id FROM quizzes WHERE teacher_id = :teacher_id AND status = 'published' ORDER BY title"
+    "SELECT z.id, z.title, z.subject_id, z.time_limit_minutes, z.max_attempts, z.questions_per_attempt, z.created_at,
+            s.name AS subject_name, c.name AS course_name,
+            (SELECT COUNT(*) FROM quiz_questions qq WHERE qq.quiz_id = z.id) AS item_count,
+            (SELECT COUNT(*) FROM assignments x WHERE x.quiz_id = z.id) AS used_count,
+            (SELECT MAX(x.created_at) FROM assignments x WHERE x.quiz_id = z.id) AS last_used
+     FROM quizzes z INNER JOIN subjects s ON s.id = z.subject_id INNER JOIN courses c ON c.id = s.course_id
+     WHERE z.teacher_id = :teacher_id AND z.status = 'published' ORDER BY z.created_at DESC"
 );
 $quizStmt->execute(['teacher_id' => $teacherId]);
 $quizzes = $quizStmt->fetchAll();
@@ -193,6 +205,51 @@ $activitySubject = [];
 foreach ($activities as $a) { $activitySubject[(int) $a['id']] = (int) $a['subject_id']; }
 $quizSubject = [];
 foreach ($quizzes as $q) { $quizSubject[(int) $q['id']] = (int) $q['subject_id']; }
+// Datos para el selector con buscador (Fase 25)
+function picker_items_activities(array $list): array
+{
+    $out = [];
+    foreach ($list as $a) {
+        $live = in_array($a['game_mode'], ['trivia', 'sapito'], true);
+        $noun = in_array($a['game_mode'], ['trivia', 'sapito'], true) ? 'pregunta' : 'palabra';
+        $chips = [$live ? '🔴 En vivo (tú inicias)' : '🕒 A su ritmo', (int) $a['item_count'] . ' ' . $noun . ((int) $a['item_count'] === 1 ? '' : 's')];
+        if ($live && (int) $a['time_per_question'] > 0) {
+            $chips[] = '⏱ ' . (int) $a['time_per_question'] . ' s por pregunta';
+        }
+        $chips[] = 'Dificultad ' . ($a['difficulty'] ?? 'media');
+        $out[] = [
+            'id' => (int) $a['id'], 'title' => $a['title'], 'icon' => game_mode_icon($a['game_mode']),
+            'subtitle' => $a['subject_name'] . ' · ' . $a['course_name'], 'chips' => $chips,
+            'type' => $a['game_mode'], 'typeLabel' => game_mode_label($a['game_mode']),
+            'subjectId' => (int) $a['subject_id'], 'subjectLabel' => $a['subject_name'] . ' · ' . $a['course_name'],
+            'created' => $a['created_at'], 'usedCount' => (int) $a['used_count'], 'lastUsed' => $a['last_used'],
+        ];
+    }
+    return $out;
+}
+
+function picker_items_quizzes(array $list): array
+{
+    $out = [];
+    foreach ($list as $q) {
+        $n = (int) $q['item_count'];
+        $chips = [$n . ' pregunta' . ($n === 1 ? '' : 's') . ' en el banco'];
+        if ((int) $q['questions_per_attempt'] > 0 && (int) $q['questions_per_attempt'] < $n) {
+            $chips[] = '🎲 ' . (int) $q['questions_per_attempt'] . ' al azar por intento';
+        }
+        $chips[] = (int) $q['time_limit_minutes'] > 0 ? '⏱ ' . (int) $q['time_limit_minutes'] . ' min' : 'Sin límite de tiempo';
+        $chips[] = '🔁 ' . max(1, (int) $q['max_attempts']) . ' intento' . ((int) $q['max_attempts'] > 1 ? 's' : '');
+        $out[] = [
+            'id' => (int) $q['id'], 'title' => $q['title'], 'icon' => '📝',
+            'subtitle' => $q['subject_name'] . ' · ' . $q['course_name'], 'chips' => $chips,
+            'type' => '', 'typeLabel' => '',
+            'subjectId' => (int) $q['subject_id'], 'subjectLabel' => $q['subject_name'] . ' · ' . $q['course_name'],
+            'created' => $q['created_at'], 'usedCount' => (int) $q['used_count'], 'lastUsed' => $q['last_used'],
+        ];
+    }
+    return $out;
+}
+
 $postedState = [
     'mode'     => in_array($_POST['mode'] ?? '', ['interactive', 'quiz', 'creation'], true) ? $_POST['mode'] : 'interactive',
     'audience' => ($_POST['audience'] ?? 'all') === 'selected' ? 'selected' : 'all',
@@ -267,9 +324,10 @@ require __DIR__ . '/../includes/header.php';
                     <label for="activity_id">Actividad (debe estar publicada)</label>
                     <select id="activity_id" name="activity_id">
                         <?php foreach ($activitiesShown as $a): ?>
-                            <option value="<?= (int) $a['id'] ?>"><?= e(game_mode_icon($a['game_mode'])) ?> <?= e($a['title']) ?></option>
+                            <option value="<?= (int) $a['id'] ?>" <?= (int) ($_POST['activity_id'] ?? 0) === (int) $a['id'] ? 'selected' : '' ?>><?= e(game_mode_icon($a['game_mode'])) ?> <?= e($a['title']) ?></option>
                         <?php endforeach; ?>
                     </select>
+                    <div id="activity_picker"></div>
                     <p class="text-muted" style="font-size:0.8rem;">
                         Trivia y Sapito se juegan en vivo (tú inicias la partida). Ahorcado y Crucigrama los juegan los estudiantes
                         a su ritmo, sin que inicies nada. En todos la entrega se califica sola.
@@ -285,9 +343,10 @@ require __DIR__ . '/../includes/header.php';
                     <label for="quiz_id">Cuestionario (debe estar publicado)</label>
                     <select id="quiz_id" name="quiz_id">
                         <?php foreach ($quizzesShown as $q): ?>
-                            <option value="<?= (int) $q['id'] ?>">📝 <?= e($q['title']) ?></option>
+                            <option value="<?= (int) $q['id'] ?>" <?= (int) ($_POST['quiz_id'] ?? 0) === (int) $q['id'] ? 'selected' : '' ?>>📝 <?= e($q['title']) ?></option>
                         <?php endforeach; ?>
                     </select>
+                    <div id="quiz_picker"></div>
                     <p class="text-muted" style="font-size:0.8rem;">
                         El estudiante lo resuelve a su ritmo, dentro de la fecha límite. Se autocalifica al entregar.
                     </p>
@@ -387,6 +446,7 @@ require __DIR__ . '/../includes/header.php';
         </div>
     </section>
 
+    <script src="<?= e(rtrim(APP_URL, '/')) ?>/assets/js/item_picker.js"></script>
     <script>
     const COURSE_STUDENTS = <?= json_encode($studentsByCourse, JSON_UNESCAPED_UNICODE) ?>;
     const SUBJECT_COURSE = <?= json_encode($subjectCourse, JSON_UNESCAPED_UNICODE) ?>;
@@ -503,6 +563,16 @@ require __DIR__ . '/../includes/header.php';
             alert('Marca al menos un estudiante, o elige "Todos los estudiantes del curso".');
         }
     });
+
+    // ---------- Selectores con buscador de actividades y cuestionarios ----------
+    <?php if (!empty($activitiesShown)): ?>
+    AulaPicker.init({ selectId: 'activity_id', containerId: 'activity_picker', noun: 'actividad', plural: 'actividades', showSubjectFilter: <?= $preSubject ? 'false' : 'true' ?>, showTypeFilter: true,
+        items: <?= json_encode(picker_items_activities($activitiesShown), JSON_UNESCAPED_UNICODE) ?> });
+    <?php endif; ?>
+    <?php if (!empty($quizzesShown)): ?>
+    AulaPicker.init({ selectId: 'quiz_id', containerId: 'quiz_picker', noun: 'cuestionario', plural: 'cuestionarios', showSubjectFilter: <?= $preSubject ? 'false' : 'true' ?>, showTypeFilter: false,
+        items: <?= json_encode(picker_items_quizzes($quizzesShown), JSON_UNESCAPED_UNICODE) ?> });
+    <?php endif; ?>
 
     // Si la página se recarga por un error, se restaura lo que había elegido
     (function restore() {
