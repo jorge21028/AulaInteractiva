@@ -113,8 +113,8 @@ function work_text_for_forum(PDO $pdo, int $assignmentId, int $studentId): strin
     $parts = [];
     foreach ($stmt->fetchAll() as $p) {
         $parts[] = $p['parent_id'] === null
-            ? 'TEMA «' . $p['title'] . '»: ' . $p['body']
-            : 'RESPUESTA (al tema «' . $p['thread_title'] . '»): ' . $p['body'];
+            ? 'COMENTARIO' . ($p['title'] ? ' «' . $p['title'] . '»' : '') . ': ' . $p['body']
+            : 'RESPUESTA A UN COMPAÑERO: ' . $p['body'];
     }
     return mb_substr(implode("\n\n", $parts), 0, WORK_TEXT_MAX_CHARS);
 }

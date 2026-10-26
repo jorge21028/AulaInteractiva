@@ -1,5 +1,5 @@
 <?php
-/** Botones de un mensaje del foro (editar / borrar / fijar / cerrar). Se incluye desde view.php con $tp = el mensaje. */
+/** Botones de un mensaje del foro (editar / borrar / fijar). Se incluye desde view.php con $tp = el mensaje. */
 if (!defined('AULA_APP')) { http_response_code(403); exit('Acceso directo no permitido.'); }
 
 $isRoot = $tp['parent_id'] === null;
@@ -22,7 +22,7 @@ $canDelete = $canEdit || $role === 'admin';
             </details>
         <?php endif; ?>
         <?php if ($canDelete): ?>
-            <form method="post" onsubmit="return confirm('¿Borrar este mensaje<?= $isRoot ? ' y todas sus respuestas' : '' ?>?')" style="display:inline;">
+            <form method="post" onsubmit="return confirm('¿Borrar este mensaje<?= $isRoot ? ' y sus respuestas' : '' ?>?')" style="display:inline;">
                 <?php csrf_field(); ?>
                 <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="post_id" value="<?= (int) $tp['id'] ?>">
@@ -34,13 +34,7 @@ $canDelete = $canEdit || $role === 'admin';
                 <?php csrf_field(); ?>
                 <input type="hidden" name="action" value="pin">
                 <input type="hidden" name="post_id" value="<?= (int) $tp['id'] ?>">
-                <button type="submit"><?= (int) $tp['is_pinned'] ? 'Quitar fijado' : '📌 Fijar' ?></button>
-            </form>
-            <form method="post" style="display:inline;">
-                <?php csrf_field(); ?>
-                <input type="hidden" name="action" value="close">
-                <input type="hidden" name="post_id" value="<?= (int) $tp['id'] ?>">
-                <button type="submit"><?= (int) $tp['is_closed'] ? 'Reabrir' : '🔒 Cerrar tema' ?></button>
+                <button type="submit"><?= (int) $tp['is_pinned'] ? 'Quitar fijado' : '📌 Fijar arriba' ?></button>
             </form>
         <?php endif; ?>
     </div>

@@ -552,7 +552,7 @@ require __DIR__ . '/../includes/header.php';
                                 <div style="font-size:0.85rem;" class="text-muted">👥 <?= e($r['group_name']) ?></div>
                             <?php endif; ?>
                             <?php if ($isForumAssignment): $fp = $forumByStudent[(int) $r['student_id']] ?? ['threads' => 0, 'replies' => 0]; ?>
-                                <div style="font-size:0.85rem;">💬 <?= (int) $fp['threads'] ?> tema(s) · <?= (int) $fp['replies'] ?> respuesta(s)
+                                <div style="font-size:0.85rem;">💬 <?= (int) $fp['threads'] ?> comentario(s) · <?= (int) $fp['replies'] ?> respuesta(s)
                                     · <a href="../forum/view.php?id=<?= (int) $assignmentId ?>&amp;student=<?= (int) $r['student_id'] ?>">Ver participación &rarr;</a></div>
                             <?php endif; ?>
                             <?php if (!empty($r['auto_submitted'])): ?>

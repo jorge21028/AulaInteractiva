@@ -57,12 +57,9 @@ function assignment_extras_from_post(array $post, string $projectType): array
         $x['forum_mode'] = (($post['forum_mode'] ?? '') === 'qa') ? 'qa' : 'general';
         $x['forum_min_threads'] = max(0, min(20, (int) ($post['forum_min_threads'] ?? 1)));
         $x['forum_min_replies'] = max(0, min(50, (int) ($post['forum_min_replies'] ?? 2)));
-        $x['forum_students_start'] = !empty($post['forum_students_start']) ? 1 : 0;
+        $x['forum_students_start'] = 1;   // los estudiantes siempre pueden comentar (el tema lo pone el profesor)
         if ($x['forum_min_threads'] + $x['forum_min_replies'] === 0) {
-            $errors[] = 'El foro debe pedir al menos un tema o una respuesta para considerarse completado.';
-        }
-        if ($x['forum_min_threads'] > 0 && !$x['forum_students_start']) {
-            $errors[] = 'Si los estudiantes no pueden abrir temas, pon 0 temas mínimos.';
+            $errors[] = 'El foro debe pedir al menos un comentario o una respuesta para considerarse completado.';
         }
     }
     return [$x, $errors];
@@ -102,18 +99,16 @@ function assignment_extras_render(array $x, ?string $fixedType = null, bool $loc
         <strong>⚙️ Opciones avanzadas</strong>
 
         <div id="extras-forum" style="display:none; margin-top:10px;">
-            <label>Modo del foro</label>
+            <p class="text-muted" style="font-size:0.85rem; margin:0 0 8px;">El <strong>título</strong> y la <strong>descripción</strong> de arriba son el tema del foro: los estudiantes lo comentan y responden a sus compañeros.</p>
+            <label>¿Cuándo ven los estudiantes los comentarios de los demás?</label>
             <select name="forum_mode">
-                <option value="general" <?= $x['forum_mode'] === 'general' ? 'selected' : '' ?>>Foro general — todos ven todo</option>
-                <option value="qa" <?= $x['forum_mode'] === 'qa' ? 'selected' : '' ?>>Pregunta-respuesta — el estudiante ve lo de los demás después de publicar su tema</option>
+                <option value="general" <?= $x['forum_mode'] === 'general' ? 'selected' : '' ?>>Pueden ver todos los comentarios sin necesidad de participar</option>
+                <option value="qa" <?= $x['forum_mode'] === 'qa' ? 'selected' : '' ?>>Solo ven los comentarios de los demás después de publicar el suyo</option>
             </select>
             <div style="display:flex; gap:12px; flex-wrap:wrap;">
-                <div style="flex:1; min-width:140px;"><label>Temas mínimos por estudiante</label><input type="number" min="0" max="20" name="forum_min_threads" value="<?= (int) $x['forum_min_threads'] ?>"></div>
-                <div style="flex:1; min-width:140px;"><label>Respuestas mínimas</label><input type="number" min="0" max="50" name="forum_min_replies" value="<?= (int) $x['forum_min_replies'] ?>"></div>
+                <div style="flex:1; min-width:140px;"><label>Comentarios mínimos por estudiante</label><input type="number" min="0" max="20" name="forum_min_threads" value="<?= (int) $x['forum_min_threads'] ?>"></div>
+                <div style="flex:1; min-width:140px;"><label>Respuestas mínimas a compañeros</label><input type="number" min="0" max="50" name="forum_min_replies" value="<?= (int) $x['forum_min_replies'] ?>"></div>
             </div>
-            <label style="display:flex; gap:8px; align-items:center; font-weight:400;">
-                <input type="checkbox" name="forum_students_start" value="1" style="width:auto;" <?= $x['forum_students_start'] ? 'checked' : '' ?>> Los estudiantes pueden abrir temas nuevos
-            </label>
             <p class="text-muted" style="font-size:0.8rem; margin:4px 0 0;">El foro se marca como completado cuando el estudiante llega al mínimo. Tú calificas su participación.</p>
         </div>
 

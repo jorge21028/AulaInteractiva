@@ -210,11 +210,11 @@ require __DIR__ . '/../includes/header.php';
     <div class="card" style="text-align:center;">
         <h2 style="margin-top:0;">💬 Foro de discusión</h2>
         <p class="text-muted">
-            Para completar esta actividad participa en el foro:
-            <strong><?= (int) $assignment['forum_min_threads'] ?></strong> tema(s) propio(s) y
+            Para completar esta actividad comenta el tema del foro:
+            <strong><?= (int) $assignment['forum_min_threads'] ?></strong> comentario(s) tuyo(s) y
             <strong><?= (int) $assignment['forum_min_replies'] ?></strong> respuesta(s) a tus compañeros.
         </p>
-        <p><strong>Tu avance:</strong> <?= (int) $fp['threads'] ?> tema(s) · <?= (int) $fp['replies'] ?> respuesta(s)</p>
+        <p><strong>Tu avance:</strong> <?= (int) $fp['threads'] ?> comentario(s) · <?= (int) $fp['replies'] ?> respuesta(s)</p>
         <a class="btn" href="<?= e(rtrim(APP_URL, '/')) ?>/forum/view.php?id=<?= (int) $assignmentId ?>">
             <?= $isOverdue ? 'Ver el foro (cerrado)' : 'Entrar al foro' ?>
         </a>

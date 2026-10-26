@@ -3,10 +3,11 @@
  * forum_helpers.php — Foros de discusión tipo Moodle (Fase 22).
  *
  * Un foro es una asignación con project_type = 'foro' (así hereda fechas, audiencia, notas, retraso, calendario...).
- * Los estudiantes abren temas (hilos) y responden; el foro se marca como completado cuando el estudiante alcanza el
- * mínimo de temas/respuestas que pidió el profesor, y el profesor califica con la participación a la vista.
- * Modos: 'general' (todos ven todo) y 'qa' (pregunta-respuesta: el estudiante ve lo de los demás solo después de
- * publicar su propio tema, para que no copie).
+ * El profesor pone el título y la descripción (el tema del foro) y los estudiantes lo comentan y responden a sus
+ * compañeros. El foro se marca como completado cuando el estudiante llega al mínimo de comentarios/respuestas que pidió
+ * el profesor, y el profesor califica con la participación a la vista.
+ * Visibilidad: 'general' (se ven todos los comentarios sin necesidad de participar) o 'qa' (el estudiante ve los de los
+ * demás solo después de publicar el suyo, para que no copie).
  */
 
 if (!defined('AULA_APP')) {
@@ -108,6 +109,52 @@ function forum_threads(PDO $pdo, int $assignmentId, ?int $onlyAuthor = null): ar
     return $stmt->fetchAll();
 }
 
+/**
+ * Comentarios del foro (mensajes de primer nivel) con sus respuestas, fijados primero y luego los más recientes.
+ * $onlyAuthor (profesor): solo los comentarios de ese estudiante o con respuestas suyas.
+ * Cada comentario trae ['replies' => [...]].
+ */
+function forum_comments(PDO $pdo, int $assignmentId, ?int $onlyAuthor = null): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT p.*, u.name AS author_name, u.role AS author_role
+         FROM forum_posts p INNER JOIN users u ON u.id = p.author_id
+         WHERE p.assignment_id = :a AND p.deleted_at IS NULL ORDER BY p.created_at ASC, p.id ASC'
+    );
+    $stmt->execute(['a' => $assignmentId]);
+    $comments = [];
+    $replies = [];
+    foreach ($stmt->fetchAll() as $p) {
+        if ($p['parent_id'] === null) {
+            $p['replies'] = [];
+            $comments[(int) $p['id']] = $p;
+        } else {
+            $replies[(int) $p['parent_id']][] = $p;
+        }
+    }
+    foreach ($replies as $parentId => $list) {
+        if (isset($comments[$parentId])) {
+            $comments[$parentId]['replies'] = $list;
+        }
+    }
+    if ($onlyAuthor !== null) {
+        $comments = array_filter($comments, function ($c) use ($onlyAuthor) {
+            if ((int) $c['author_id'] === $onlyAuthor) {
+                return true;
+            }
+            foreach ($c['replies'] as $r) {
+                if ((int) $r['author_id'] === $onlyAuthor) {
+                    return true;
+                }
+            }
+            return false;
+        });
+    }
+    // fijados primero; luego el más reciente arriba
+    usort($comments, fn($a, $b) => [(int) $b['is_pinned'], $b['created_at'], $b['id']] <=> [(int) $a['is_pinned'], $a['created_at'], $a['id']]);
+    return $comments;
+}
+
 function forum_post(PDO $pdo, int $assignmentId, int $postId): ?array
 {
     $stmt = $pdo->prepare(
@@ -128,7 +175,7 @@ function forum_replies(PDO $pdo, int $threadId): array
     return $stmt->fetchAll();
 }
 
-/** Modo pregunta-respuesta: el estudiante ve lo de los demás solo después de publicar su propio tema. */
+/** Si el profesor eligió "ver después de participar": el estudiante ve los comentarios de los demás solo después de publicar el suyo. */
 function forum_can_see_others(PDO $pdo, array $assignment, int $userId, string $role): bool
 {
     if ($role !== 'student' || ($assignment['forum_mode'] ?? 'general') !== 'qa') {
