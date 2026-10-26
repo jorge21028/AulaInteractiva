@@ -18,11 +18,11 @@ require_role('teacher');
 $input = json_decode(file_get_contents('php://input'), true) ?: [];
 csrf_verify($input['csrf_token'] ?? null);
 
-// Freno simple: máximo 30 sugerencias por hora y una cada 3 segundos (cuida la cuota gratuita de Gemini)
+// Freno simple: máximo 120 sugerencias por hora (alcanza para calificar un grupo completo) y una cada 3 segundos (cuida la cuota gratuita de Gemini)
 $now = time();
 $calls = array_values(array_filter((array) ($_SESSION['ai_grade_calls'] ?? []), fn($t) => $t > $now - 3600));
-if (count($calls) >= 30) {
-    json_response(['success' => false, 'message' => 'Llegaste al límite de 30 sugerencias por hora. Intenta más tarde.'], 429);
+if (count($calls) >= 120) {
+    json_response(['success' => false, 'message' => 'Llegaste al límite de 120 sugerencias por hora. Intenta más tarde.'], 429);
 }
 if ($calls && $now - end($calls) < 3) {
     json_response(['success' => false, 'message' => 'Espera unos segundos antes de pedir otra sugerencia.'], 429);

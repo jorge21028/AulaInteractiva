@@ -205,6 +205,13 @@ require __DIR__ . '/../includes/header.php';
             <?php endif; ?>
         <?php endif; ?>
     </div>
+<?php elseif ($isOverdue && $assignment['score'] !== null && (float) $assignment['score'] === 0.0 && empty($assignment['returned_at'])): ?>
+    <div class="card" style="text-align:center;">
+        <h2 style="margin-top:0;">🚫 Sin entrega</h2>
+        <p class="text-muted">No entregaste esta asignación a tiempo.</p>
+        <p><strong>Calificación: 0 / <?= (int) $assignment['points'] ?></strong></p>
+        <?php if (!empty($assignment['feedback'])): ?><p class="text-muted"><?= nl2br(e($assignment['feedback'])) ?></p><?php endif; ?>
+    </div>
 <?php elseif ($isForum): ?>
     <?php $fp = forum_participation($pdo, $assignmentId, (int) $studentId, $assignment); ?>
     <div class="card" style="text-align:center;">

@@ -26,11 +26,11 @@ const AUTOSUBMIT_THROTTLE_SECONDS = 60;
 
 /**
  * Cierra todo lo vencido (opcionalmente solo de una asignación y/o de un estudiante).
- * Devuelve ['quizzes' => n, 'games' => n, 'projects' => n].
+ * Devuelve ['quizzes' => n, 'games' => n, 'projects' => n, 'zeros' => n].
  */
 function autosubmit_sweep(PDO $pdo, ?int $assignmentId = null, ?int $studentId = null): array
 {
-    $done = ['quizzes' => 0, 'games' => 0, 'projects' => 0];
+    $done = ['quizzes' => 0, 'games' => 0, 'projects' => 0, 'zeros' => 0];
     $cut = date('Y-m-d H:i:s', time() - AUTOSUBMIT_GRACE_SECONDS);
 
     try {
@@ -94,6 +94,34 @@ function autosubmit_sweep(PDO $pdo, ?int $assignmentId = null, ?int $studentId =
             if (project_submit($pdo, (int) $r['id'], (int) $r['student_id'], (string) $r['deadline'])) {
                 $done['projects']++;
             }
+        }
+
+        // ---- Sin entrega: al vencer el plazo, quien no entregó nada recibe 0 (si la asignación lo pide).
+        // Va al final: antes ya se enviaron los borradores con contenido, los cuestionarios y los juegos a medias.
+        // El 0 NO convierte la entrega en "Entregada": el estado sigue siendo "Sin entrega".
+        $deadline2 = "DATE_ADD(COALESCE(ax.due_date, a.due_date), INTERVAL IF(a.late_allowed = 1, a.late_max_days, 0) DAY)";
+        $sql = "SELECT sub.id FROM submissions sub
+                INNER JOIN assignments a ON a.id = sub.assignment_id
+                LEFT JOIN assignment_extensions ax ON ax.assignment_id = a.id AND ax.student_id = sub.student_id
+                WHERE a.auto_zero = 1 AND sub.status <> 'completed' AND sub.score IS NULL AND sub.auto_zero_at IS NULL
+                  AND sub.returned_at IS NULL
+                  AND COALESCE(ax.due_date, a.due_date) IS NOT NULL AND {$deadline2} < :cut
+                  AND NOT EXISTS (SELECT 1 FROM quiz_attempts qa WHERE qa.assignment_id = sub.assignment_id AND qa.student_id = sub.student_id AND qa.status = 'in_progress')
+                  AND NOT EXISTS (SELECT 1 FROM word_game_attempts wg WHERE wg.assignment_id = sub.assignment_id AND wg.student_id = sub.student_id AND wg.status = 'in_progress')";
+        $params = ['cut' => $cut];
+        if ($assignmentId !== null) { $sql .= ' AND sub.assignment_id = :aid'; $params['aid'] = $assignmentId; }
+        if ($studentId !== null) { $sql .= ' AND sub.student_id = :sid'; $params['sid'] = $studentId; }
+        $stmt = $pdo->prepare($sql . ' LIMIT 500');
+        $stmt->execute($params);
+        $upd = $pdo->prepare(
+            "UPDATE submissions SET score = 0, raw_score = NULL, reviewed_at = :now, auto_zero_at = :now2,
+                    feedback = COALESCE(feedback, 'Sin entrega: se calificó con 0 automáticamente al vencer el plazo.')
+             WHERE id = :id AND status <> 'completed' AND score IS NULL AND auto_zero_at IS NULL"
+        );
+        foreach ($stmt->fetchAll() as $r) {
+            $now = now_datetime();
+            $upd->execute(['now' => $now, 'now2' => $now, 'id' => $r['id']]);
+            $done['zeros'] += $upd->rowCount();
         }
     } catch (Throwable $e) {
         // Nunca romper la página que disparó el barrido (p. ej. si aún no se ejecutó el SQL de la fase)

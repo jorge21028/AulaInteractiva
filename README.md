@@ -274,3 +274,10 @@ Posibles ampliaciones futuras: fichas de estudio, preguntas con audio/video como
 - **🔒 Bloquear "pegar"** (`assets/js/paste_guard.js`, columna `assignments.block_paste`): en las actividades de creación el profesor puede bloquear Ctrl+V / Cmd+V / Shift+Insert, "Pegar" del clic derecho o del teléfono, y arrastrar texto a un campo. Se activa al crear/editar la asignación o con el botón **🔒/🔓** de la pantalla de la asignación, y funciona en resumen, tabla, infografía, mapa mental, presentación, imágenes, archivos y foro. Es una barrera contra el "copiar y pegar" fácil, no una seguridad infalible.
 - **Base de datos:** ejecutar `database/schema_fase23_autoenvio_pegar.sql`.
 
+## Fase 26 — Calificar todas con IA y "Sin entrega" con 0 automático
+
+- **✨ Calificar todas con IA** (`teacher/assignment_detail.php`): botón en la barra de guardado. Recorre las entregas realmente enviadas (una por una, con pausa por la cuota gratuita de Gemini), rellena nota y comentario y **no guarda nada**: el profesor revisa y pulsa "Guardar". Se saltan las que no se entregaron y las que ya tienen nota (casilla para incluirlas), se puede detener, y avisa cuáles no pudo calificar. El límite del servidor subió a 120 sugerencias por hora.
+- **Sin entrega con 0** (`assignments.auto_zero`, `submissions.auto_zero_at`): por asignación (casilla en crear/editar, activa por defecto en las nuevas) quien no entregó recibe 0 automáticamente al vencer el plazo (más los días de gracia si permite entregas tardías). El 0 **no** lo convierte en "Entregada": sigue como "🚫 Sin entrega · calificada con 0". Antes se envían los borradores con contenido, cuestionarios y juegos a medias, por lo que esos no reciben 0. Nunca pisa una nota del profesor ni toca trabajos devueltos para corregir.
+- **Nota en 0 puesta a mano:** a quien no entregó ya no lo pasa a "Entregada" (una nota mayor que 0 sí lo hace, como antes; un trabajo entregado calificado con 0 sigue siendo "Entregada").
+- **Base de datos:** ejecutar `database/schema_fase26_cero_automatico.sql`.
+

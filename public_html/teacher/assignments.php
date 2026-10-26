@@ -176,6 +176,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
             if (isset($extras)) {
                 assignment_extras_save($pdo, $assignmentId, $extras);
             }
+            $pdo->prepare('UPDATE assignments SET auto_zero = :z WHERE id = :id')
+                ->execute(['z' => !empty($_POST['auto_zero']) ? 1 : 0, 'id' => $assignmentId]);
             audit_log(
                 $pdo, $teacherId, 'create_assignment',
                 "Asignación '{$title}' creada" . ($studentIds !== null ? ' solo para ' . count($studentIds) . ' estudiante(s)' : '')
@@ -393,6 +395,11 @@ require __DIR__ . '/../includes/header.php';
 
             <label for="points">Puntuación</label>
             <input type="text" id="points" name="points" value="100">
+
+<label style="display:flex; gap:8px; align-items:center; font-weight:400; margin-top:10px;">
+    <input type="checkbox" name="auto_zero" value="1" style="width:auto;" <?= ($_SERVER['REQUEST_METHOD'] !== 'POST' || !empty($_POST['auto_zero'])) ? 'checked' : '' ?>>
+    <span>⛔ Calificar con <strong>0</strong> a quien no entregue al vencer el plazo <span class="text-muted">(sigue figurando como "Sin entrega")</span></span>
+</label>
 
             <div id="audience-box" style="margin-top:18px; padding:14px; border:1px solid var(--color-border); border-radius:12px; background:#F8FAFC;">
                 <strong>¿Para quién es esta asignación?</strong>

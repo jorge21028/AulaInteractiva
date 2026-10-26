@@ -118,6 +118,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($isCreationWork) {
             assignment_extras_save($pdo, $assignmentId, $extrasPosted, !$workStarted);
         }
+        $pdo->prepare('UPDATE assignments SET auto_zero = :z WHERE id = :id AND teacher_id = :tid')
+            ->execute(['z' => !empty($_POST['auto_zero']) ? 1 : 0, 'id' => $assignmentId, 'tid' => $teacherId]);
         audit_log($pdo, $teacherId, 'update_assignment', "Asignación #{$assignmentId} editada ('{$form['title']}')");
         redirect('teacher/assignment_detail.php?id=' . $assignmentId . '&updated=1');
     }
@@ -162,6 +164,11 @@ require __DIR__ . '/../includes/header.php';
 
         <label for="points">Puntuación</label>
         <input type="text" id="points" name="points" value="<?= e($form['points']) ?>">
+
+<label style="display:flex; gap:8px; align-items:center; font-weight:400; margin-top:10px;">
+    <input type="checkbox" name="auto_zero" value="1" style="width:auto;" <?= (($_SERVER['REQUEST_METHOD'] === 'POST') ? !empty($_POST['auto_zero']) : !empty($assignment['auto_zero'])) ? 'checked' : '' ?>>
+    <span>⛔ Calificar con <strong>0</strong> a quien no entregue al vencer el plazo <span class="text-muted">(sigue figurando como "Sin entrega")</span></span>
+</label>
         <?php if ($gradedCount > 0): ?>
             <p class="text-muted" style="font-size:0.8rem; margin:2px 0 10px;">
                 ⚠️ Ya hay <?= $gradedCount ?> entrega(s) con nota. Cambiar la puntuación <strong>no recalcula</strong> las notas ya registradas.

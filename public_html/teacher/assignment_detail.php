@@ -155,7 +155,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
                 continue;
             }
 
-            $newStatus = ($score !== null || $row['status'] === 'completed') ? 'completed' : $row['status'];
+            // Una nota en 0 a quien NO entregó no lo convierte en "Entregada": sigue como "Sin entrega" (con su 0).
+            $newStatus = (($score !== null && $score > 0) || $row['status'] === 'completed') ? 'completed' : $row['status'];
             $update->execute([
                 'score' => $score !== null ? late_final_score($score, $penalty) : null,
                 'raw_score' => ($score !== null && $penalty > 0) ? $score : null,
@@ -178,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
                     $update->execute([
                         'score' => $c['score'] !== null ? late_final_score($c['score'], $mPenalty) : null,
                         'raw_score' => ($c['score'] !== null && $mPenalty > 0) ? $c['score'] : null,
-                        'feedback' => $c['feedback'], 'status' => ($c['score'] !== null || $mate['status'] === 'completed') ? 'completed' : $mate['status'],
+                        'feedback' => $c['feedback'], 'status' => (($c['score'] !== null && $c['score'] > 0) || $mate['status'] === 'completed') ? 'completed' : $mate['status'],
                         'reviewed_at' => $now, 'id' => $subByStudent[$mateId],
                     ]);
                     $touched[$mateId] = true;
@@ -204,7 +205,7 @@ $rosterStmt = $pdo->prepare(
     'SELECT sub.id AS submission_id, sub.student_id, sub.status, sub.score, sub.feedback, sub.completed_at, sub.reviewed_at, sub.project_id, sub.quiz_attempt_id,
         qa.tab_switches, wga.status AS wg_status, wga.correct_count AS wg_correct, wga.total_count AS wg_total,
         wga.state_json AS wg_state, wga.updated_at AS wg_updated_at,
-        sub.returned_at, sub.return_note, sub.game_id, sub.raw_score, sub.penalty_pct, sub.late_days, sub.auto_submitted, gg.name AS group_name,
+        sub.returned_at, sub.return_note, sub.game_id, sub.raw_score, sub.penalty_pct, sub.late_days, sub.auto_submitted, sub.auto_zero_at, gg.name AS group_name,
         (SELECT COUNT(*) FROM quiz_attempts qa4 WHERE qa4.assignment_id = sub.assignment_id AND qa4.student_id = sub.student_id AND qa4.status <> \'in_progress\') AS quiz_done,
         (SELECT COUNT(*) FROM quiz_attempts qa3 WHERE qa3.assignment_id = sub.assignment_id AND qa3.student_id = sub.student_id) AS quiz_attempts_total,
         sp.id AS draft_project_id, sp.status AS project_status, sp.type AS draft_type, sp.data_json AS draft_data,
@@ -294,6 +295,11 @@ function roster_progress(array $r, array $assignment): array
 {
     if ($r['status'] === 'completed') {
         return ['state' => 'completed', 'label' => '✅ Entregada', 'detail' => '', 'link' => null];
+    }
+
+    // No entregó y tiene 0 (puesto por el profesor o automáticamente): sigue figurando como "Sin entrega"
+    if ($r['score'] !== null && (float) $r['score'] === 0.0 && empty($r['returned_at']) && empty($r['quiz_open_started']) && ($r['wg_status'] ?? null) !== 'in_progress') {
+        return ['state' => 'notstarted', 'label' => '🚫 Sin entrega', 'detail' => 'calificada con 0' . (!empty($r['auto_zero_at']) ? ' automáticamente' : ''), 'link' => null];
     }
 
     // --- Cuestionario ---
@@ -621,7 +627,7 @@ require __DIR__ . '/../includes/header.php';
                         </div>
                         <?php if (($r['project_id'] || $isForumAssignment) && $assignment['quiz_id'] === null && $assignment['activity_id'] === null): ?>
                             <div>
-                                <button type="button" class="btn btn-secondary btn-ai-grade" data-submission="<?= $sid ?>" style="margin:0; padding:8px 12px; font-size:0.85rem;" title="Gemini propone una nota y un comentario; tú decides si los usas">✨ Sugerir con IA</button>
+                                <button type="button" class="btn btn-secondary btn-ai-grade" data-submission="<?= $sid ?>" data-delivered="<?= $r['status'] === 'completed' ? 1 : 0 ?>" style="margin:0; padding:8px 12px; font-size:0.85rem;" title="Gemini propone una nota y un comentario; tú decides si los usas">✨ Sugerir con IA</button>
                             </div>
                         <?php endif; ?>
                         <?php if ($isFilesAssignment && $r['draft_files'] > 0):
@@ -640,6 +646,15 @@ require __DIR__ . '/../includes/header.php';
 
             <div id="grades-savebar" style="position:sticky; bottom:0; z-index:20; background:#fff; border-top:1px solid #E2E8F0; padding:12px 16px; margin:16px -16px -16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
                 <span id="grades-status" class="text-muted" style="font-size:0.9rem;">Sin cambios pendientes</span>
+                <?php if (($assignment['quiz_id'] ?? null) === null && ($assignment['activity_id'] ?? null) === null): ?>
+                    <span id="ai-all-wrap" style="display:inline-flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <button type="button" class="btn btn-secondary" id="btn-ai-all" style="margin:0;" title="Gemini propone nota y comentario para cada entrega; tú revisas y guardas">✨ Calificar todas con IA</button>
+                        <label style="display:inline-flex; gap:4px; align-items:center; font-weight:400; font-size:0.8rem; margin:0;">
+                            <input type="checkbox" id="ai-all-replace" style="width:auto;"> incluir las que ya tienen nota
+                        </label>
+                        <span id="ai-all-status" class="text-muted" style="font-size:0.85rem;"></span>
+                    </span>
+                <?php endif; ?>
                 <button type="submit" class="btn" id="grades-save" style="margin:0;">Guardar todas las calificaciones</button>
             </div>
         </form>
@@ -811,32 +826,88 @@ require __DIR__ . '/../includes/header.php';
 </script>
 <?php endif; ?>
 <script>
-// ✨ Calificación asistida por Gemini: solo RELLENA los campos con una sugerencia; el profesor revisa y pulsa "Guardar calificaciones".
+// ✨ Calificación asistida por Gemini: solo RELLENA los campos con una sugerencia; el profesor revisa y pulsa "Guardar".
 (function () {
     const API = <?= json_encode(rtrim(APP_URL, '/') . '/api/gemini/suggest_grade.php') ?>;
     const CSRF = <?= json_encode(csrf_token()) ?>;
-    document.querySelectorAll('.btn-ai-grade').forEach(btn => btn.addEventListener('click', async () => {
-        const sid = btn.dataset.submission;
-        const row = btn.closest('[data-submission-row], tr, li, .card') || document;
+    const GAP_MS = 3500;   // el servidor exige 3 s entre sugerencias (cuida la cuota gratuita de Gemini)
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    async function suggest(sid, retry) {
+        const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ submission_id: parseInt(sid, 10), csrf_token: CSRF }) });
+        let data = null; try { data = await res.json(); } catch (e) { /* respuesta no JSON */ }
+        if (res.status === 429 && retry) { await sleep(5000); return suggest(sid, false); }
+        return data || { success: false, message: 'Respuesta inesperada del servidor.' };
+    }
+    function fill(sid, data) {
         const scoreInput = document.querySelector('input[name="scores[' + sid + ']"]');
         const fbInput = document.querySelector('input[name="feedbacks[' + sid + ']"]');
+        scoreInput.value = data.score;
+        let fb = data.feedback;
+        if (data.improvements && data.improvements.length) fb += ' Para mejorar: ' + data.improvements.join('; ') + '.';
+        fbInput.value = fb;
+        [scoreInput, fbInput].forEach(i => i.dispatchEvent(new Event('input', { bubbles: true })));
+    }
+
+    // ----- una entrega -----
+    document.querySelectorAll('.btn-ai-grade').forEach(btn => btn.addEventListener('click', async () => {
+        const sid = btn.dataset.submission;
+        const scoreInput = document.querySelector('input[name="scores[' + sid + ']"]');
         if (scoreInput && scoreInput.value.trim() !== '' && !confirm('Ya hay una calificación escrita. ¿Reemplazarla por la sugerencia de la IA?')) return;
         const old = btn.textContent; btn.disabled = true; btn.textContent = '✨ Analizando...';
         try {
-            const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-                body: JSON.stringify({ submission_id: parseInt(sid, 10), csrf_token: CSRF }) });
-            const data = await res.json();
+            const data = await suggest(sid, true);
             if (!data.success) { alert(data.message || 'No se pudo obtener la sugerencia.'); return; }
-            scoreInput.value = data.score;
-            let fb = data.feedback;
-            if (data.improvements && data.improvements.length) fb += ' Para mejorar: ' + data.improvements.join('; ') + '.';
-            fbInput.value = fb;
-            [scoreInput, fbInput].forEach(i => i.dispatchEvent(new Event('input', { bubbles: true })));
+            fill(sid, data);
             btn.textContent = '✅ Sugerencia lista — revísala y guarda';
             setTimeout(() => { btn.textContent = old; }, 6000);
         } catch (e) { alert('No se pudo contactar a la IA. Revisa tu conexión e intenta de nuevo.'); }
         finally { btn.disabled = false; if (btn.textContent === '✨ Analizando...') btn.textContent = old; }
     }));
+
+    // ----- todas a la vez (una por una, con pausa; solo las entregas que el estudiante realmente envió) -----
+    const allBtn = document.getElementById('btn-ai-all');
+    if (!allBtn) return;
+    const allStatus = document.getElementById('ai-all-status');
+    let running = false, cancel = false;
+
+    allBtn.addEventListener('click', async () => {
+        if (running) { cancel = true; allStatus.textContent = 'Deteniendo...'; return; }
+        const replace = document.getElementById('ai-all-replace').checked;
+        const queue = [];
+        document.querySelectorAll('.btn-ai-grade').forEach(b => {
+            if (b.dataset.delivered !== '1') return;                       // sin entrega: no hay nada que calificar con IA
+            const input = document.querySelector('input[name="scores[' + b.dataset.submission + ']"]');
+            if (!replace && input && input.value.trim() !== '') return;    // ya tiene nota
+            queue.push(b.dataset.submission);
+        });
+        if (!queue.length) { alert('No hay entregas por calificar. (Se saltan las que no se entregaron y las que ya tienen nota; marca "incluir las que ya tienen nota" para rehacerlas.)'); return; }
+        const mins = Math.ceil(queue.length * (GAP_MS + 4000) / 60000);
+        if (!confirm('La IA va a revisar ' + queue.length + ' entrega(s), una por una (aprox. ' + mins + ' min). Solo rellena las notas y comentarios: tú los revisas y guardas. ¿Empezar?')) return;
+
+        running = true; cancel = false; allBtn.textContent = '⏹ Detener';
+        let ok = 0; const failed = [];
+        for (let i = 0; i < queue.length && !cancel; i++) {
+            const sid = queue[i];
+            allStatus.textContent = '✨ Calificando ' + (i + 1) + ' de ' + queue.length + '...';
+            try {
+                const data = await suggest(sid, true);
+                if (data.success) { fill(sid, data); ok++; }
+                else {
+                    const row = document.querySelector('input[name="scores[' + sid + ']"]').closest('.grade-row');
+                    const name = row ? (row.querySelector('strong') ? row.querySelector('strong').textContent : '') : '';
+                    failed.push((name || ('#' + sid)) + ': ' + (data.message || 'error'));
+                    if (/límite|Falta configurar|GEMINI_API_KEY/i.test(data.message || '')) break;   // no tiene sentido seguir
+                }
+            } catch (e) { failed.push('#' + sid + ': sin conexión'); }
+            if (i < queue.length - 1 && !cancel) await sleep(GAP_MS);
+        }
+        running = false; allBtn.textContent = '✨ Calificar todas con IA';
+        allStatus.textContent = '✅ ' + ok + ' sugerida(s)' + (failed.length ? ' · ' + failed.length + ' sin sugerencia' : '') + (cancel ? ' (detenido)' : '') + ' — revisa y pulsa "Guardar".';
+        if (failed.length) alert('No se pudo sugerir para:\n\n' + failed.slice(0, 12).join('\n') + (failed.length > 12 ? '\n...' : ''));
+    });
+    window.addEventListener('beforeunload', (e) => { if (running) { e.preventDefault(); e.returnValue = ''; } });
 })();
 </script>
 <?php require __DIR__ . '/../includes/footer.php'; ?>
