@@ -131,8 +131,93 @@ require __DIR__ . '/../includes/header.php';
 </p>
 
 <?php if ($assignment['description']): ?>
-    <div class="card"><?= render_description($assignment['description'], $assignment['description_format'] ?? 'text') ?></div>
+    <div class="card consigna">
+        <?= render_description(
+            $assignment['description'],
+            $assignment['description_format'] ?? 'text'
+        ) ?>
+    </div>
 <?php endif; ?>
+<style>
+    /* Protección exclusiva de las consignas */
+    .consigna {
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
+        user-select: none !important;
+        -webkit-touch-callout: none;
+    }
+
+    .consigna img {
+        -webkit-user-drag: none;
+        user-drag: none;
+    }
+</style>
+
+<script>
+(function () {
+
+    const consigna = document.querySelector('.consigna');
+
+    if (!consigna) return;
+
+    // Bloquear menú contextual
+    consigna.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+    });
+
+    // Bloquear arrastrar contenido
+    consigna.addEventListener('dragstart', function(e) {
+        e.preventDefault();
+    });
+
+    // Comprobar si la selección pertenece a la consigna
+    function seleccionEnConsigna() {
+        const seleccion = window.getSelection();
+
+        if (!seleccion || seleccion.rangeCount === 0) {
+            return false;
+        }
+
+        for (let i = 0; i < seleccion.rangeCount; i++) {
+            try {
+                if (seleccion.getRangeAt(i).intersectsNode(consigna)) {
+                    return true;
+                }
+            } catch (e) {}
+        }
+
+        return false;
+    }
+
+    // Bloquear copiar
+    document.addEventListener('copy', function(e) {
+        if (seleccionEnConsigna()) {
+            e.preventDefault();
+        }
+    });
+
+    // Bloquear cortar
+    document.addEventListener('cut', function(e) {
+        if (seleccionEnConsigna()) {
+            e.preventDefault();
+        }
+    });
+
+    // Bloquear atajos de copia y selección
+    document.addEventListener('keydown', function(e) {
+        if (
+            (e.ctrlKey || e.metaKey) &&
+            ['c', 'x', 'a'].includes(e.key.toLowerCase()) &&
+            (seleccionEnConsigna() ||
+             consigna.contains(document.activeElement))
+        ) {
+            e.preventDefault();
+        }
+    });
+
+})();
+</script>
 
 <?php if ($myGroup): ?>
     <div class="card" style="border-color:#BFD9FF; background:#F5F9FF;">
