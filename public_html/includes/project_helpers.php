@@ -521,6 +521,7 @@ function project_paste_blocked(PDO $pdo, array $project): bool
     if (empty($project['assignment_id'])) {
         return false;
     }
+    $GLOBALS['aula_paste_project_id'] = (int) ($project['id'] ?? 0);   // para que el vigilante pueda reportar al servidor
     try {
         $stmt = $pdo->prepare('SELECT block_paste FROM assignments WHERE id = :id');
         $stmt->execute(['id' => $project['assignment_id']]);
@@ -536,6 +537,57 @@ function paste_guard_tags(bool $blocked): string
     if (!$blocked) {
         return '';
     }
-    return '<script>window.AULA_BLOCK_PASTE = true;</script>' . "\n"
+    $report = '';
+    if (!empty($GLOBALS['aula_paste_project_id']) && function_exists('csrf_token')) {
+        $report = '<script>window.AULA_PASTE_REPORT = ' . json_encode([
+            'url' => rtrim(APP_URL, '/') . '/api/projects/paste_flag.php',
+            'project' => (int) $GLOBALS['aula_paste_project_id'],
+            'csrf' => csrf_token(),
+        ]) . ';</script>' . "\n";
+    }
+    return '<script>window.AULA_BLOCK_PASTE = true;</script>' . "\n" . $report
         . '<script src="' . e(rtrim(APP_URL, '/')) . '/assets/js/paste_guard.js"></script>';
+}
+
+
+/** ¿Ya existen las columnas de la marca "Copy and Paste" (migracion_copy_paste.sql)? */
+function paste_flag_ready(PDO $pdo): bool
+{
+    static $ready = null;
+    if ($ready === null) {
+        try {
+            $ready = (bool) $pdo->query("SHOW COLUMNS FROM student_projects LIKE 'paste_count'")->fetch();
+        } catch (Throwable $e) {
+            $ready = false;
+        }
+    }
+    return $ready;
+}
+
+/** Fragmento SELECT con las columnas de la marca (o ceros si aún no hay migración). Ej: ", sp.paste_count, ..." */
+function paste_flag_cols(PDO $pdo, string $alias = 'sp'): string
+{
+    return paste_flag_ready($pdo)
+        ? ", {$alias}.paste_count, {$alias}.paste_attempts, {$alias}.paste_max_chars"
+        : ', 0 AS paste_count, 0 AS paste_attempts, 0 AS paste_max_chars';
+}
+
+/** Marca roja "Copy and Paste" (pegó estando bloqueado) o aviso ámbar (solo lo intentó y se le bloqueó). */
+function paste_flag_badge(array $row): string
+{
+    $hits = (int) ($row['paste_count'] ?? 0);
+    $tries = (int) ($row['paste_attempts'] ?? 0);
+    if ($hits > 0) {
+        $max = (int) ($row['paste_max_chars'] ?? 0);
+        $tip = 'Se detectó texto pegado o insertado de golpe estando el pegado bloqueado'
+            . ($hits > 1 ? " ({$hits} veces" : ' (1 vez') . ($max > 0 ? ", hasta {$max} caracteres de una vez" : '') . ').'
+            . ($tries > 0 ? " Además intentó pegar {$tries} vez/veces y se le bloqueó." : '');
+        return ' <span style="display:inline-block; padding:2px 10px; border-radius:999px; font-weight:700; font-size:0.78rem; background:#DC2626; color:#fff;"'
+            . ' title="' . e($tip) . '">📋 Copy and Paste' . ($hits > 1 ? ' ×' . $hits : '') . '</span>';
+    }
+    if ($tries > 0) {
+        return ' <span style="display:inline-block; padding:1px 9px; border-radius:999px; font-weight:600; font-size:0.75rem; background:#FFF4E5; color:#B45309; border:1px solid #FCD9A8;"'
+            . ' title="Intentó pegar texto y el sistema se lo bloqueó (no llegó a pegarse).">🔒 Intentó pegar ×' . $tries . '</span>';
+    }
+    return '';
 }

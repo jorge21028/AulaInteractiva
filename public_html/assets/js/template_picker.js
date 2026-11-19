@@ -47,6 +47,7 @@
                     use.type = 'button';
                     use.addEventListener('click', function () {
                         if (!confirm('Esto reemplaza lo que tienes ahora en el editor. ¿Usar la plantilla «' + t.name + '»?')) return;
+                        if (global.AulaPasteGuard) global.AulaPasteGuard.allow(5000);   // aplicar una plantilla no es "pegar"
                         Promise.resolve(global.AulaDraft.applyTemplate({ data: t.data })).then(done);
                     });
                     row.appendChild(info);

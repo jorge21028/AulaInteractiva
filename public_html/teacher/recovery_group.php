@@ -11,6 +11,7 @@ require_once __DIR__ . '/../includes/space_helpers.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/late_helpers.php';
 require_once __DIR__ . '/../includes/report_helpers.php';
+require_once __DIR__ . '/../includes/project_helpers.php';
 require_once __DIR__ . '/../includes/recovery_helpers.php';
 
 require_role('teacher');
@@ -421,7 +422,7 @@ require __DIR__ . '/../includes/header.php';
                                         <strong><?= e($r['student_name']) ?></strong>
                                     <?php endif; ?>
                                 </td>
-                                <td style="padding:6px;"><span class="chip <?= e($stClass) ?>"><?= e($stLabel) ?></span>
+                                <td style="padding:6px;"><span class="chip <?= e($stClass) ?>"><?= e($stLabel) ?></span><?= paste_flag_badge($r) ?>
                                     <?php if (!empty($r['completed_at'])): ?><br><span class="text-muted" style="font-size:0.75rem;"><?= e(dt_format($r['completed_at'])) ?></span><?php endif; ?></td>
                                 <td style="padding:6px; white-space:nowrap;"><?= e($orig) ?></td>
                                 <td style="padding:6px; white-space:nowrap;">

@@ -209,7 +209,7 @@ $rosterStmt = $pdo->prepare(
         (SELECT COUNT(*) FROM quiz_attempts qa4 WHERE qa4.assignment_id = sub.assignment_id AND qa4.student_id = sub.student_id AND qa4.status <> \'in_progress\') AS quiz_done,
         (SELECT COUNT(*) FROM quiz_attempts qa3 WHERE qa3.assignment_id = sub.assignment_id AND qa3.student_id = sub.student_id) AS quiz_attempts_total,
         sp.id AS draft_project_id, sp.status AS project_status, sp.type AS draft_type, sp.data_json AS draft_data,
-        sp.updated_at AS project_updated_at,
+        sp.updated_at AS project_updated_at' . paste_flag_cols($pdo) . ',
         (SELECT qa2.started_at FROM quiz_attempts qa2
           WHERE qa2.quiz_id = :quiz_a AND qa2.student_id = sub.student_id AND qa2.status = \'in_progress\'
           ORDER BY qa2.id DESC LIMIT 1) AS quiz_open_started,
@@ -541,6 +541,7 @@ require __DIR__ . '/../includes/header.php';
                                     <span style="display:inline-block; padding:2px 10px; border-radius:999px; font-weight:600; <?= $badge ?>"><?= e($pg['label']) ?></span>
                                     <?php if ($pg['detail'] !== ''): ?>· <?= e($pg['detail']) ?><?php endif; ?>
                                 <?php endif; ?>
+                                <?= paste_flag_badge($r) ?>
                             </p>
                             <?php if ($isFilesAssignment && !empty($r['files'])): ?>
                                 <ul style="list-style:none; margin:6px 0 0; padding:0; font-size:0.85rem;">

@@ -48,6 +48,17 @@ require __DIR__ . '/../includes/header.php';
     <?php endif; ?>
 </p>
 
+<?php if ((int) ($project['paste_count'] ?? 0) > 0): ?>
+    <div class="alert alert-error" style="border:2px solid #DC2626; background:#FEF2F2; color:#991B1B; margin-bottom:16px;">
+        <strong>📋 Copy and Paste</strong><br>
+        Se detectó que <?= e($project['student_name']) ?> pegó o insertó texto de golpe (<?= (int) $project['paste_count'] ?> vez/veces<?= (int) $project['paste_max_chars'] > 0 ? ', hasta ' . (int) $project['paste_max_chars'] . ' caracteres seguidos' : '' ?>)
+        estando el pegado bloqueado en esta asignación<?= (int) $project['paste_attempts'] > 0 ? '. Además intentó pegar ' . (int) $project['paste_attempts'] . ' vez/veces y se le bloqueó' : '' ?>.
+        Revisa si el contenido es suyo: la detección puede fallar, por ejemplo con el dictado por voz.
+    </div>
+<?php elseif ((int) ($project['paste_attempts'] ?? 0) > 0): ?>
+    <p class="text-muted">🔒 Intentó pegar texto <?= (int) $project['paste_attempts'] ?> vez/veces y el sistema se lo bloqueó (no llegó a pegarse).</p>
+<?php endif; ?>
+
 <?php if ($project['status'] === 'submitted' && !empty($project['auto_submitted'])): ?>
     <div class="alert alert-error" style="border:2px solid #F59E0B; background:#FFF8E6; color:#92400E; margin-bottom:16px;">
         <strong>⚠️ TRABAJO INCOMPLETO — BORRADOR</strong><br>

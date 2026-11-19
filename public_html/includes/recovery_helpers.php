@@ -311,13 +311,14 @@ function recovery_add_items(PDO $pdo, array $group, int $teacherId, array $picke
 function recovery_group_rows(PDO $pdo, int $groupId): array
 {
     require_once __DIR__ . '/space_helpers.php';
+    require_once __DIR__ . '/project_helpers.php';
 
     $st = $pdo->prepare(
         "SELECT a.id AS assignment_id, a.title, a.points, a.due_date, a.project_type, a.activity_id, a.quiz_id, a.source_assignment_id,
                 act.title AS activity_title, act.game_mode, qz.title AS quiz_title,
                 sub.id AS sub_id, sub.student_id, sub.status, sub.score, sub.raw_score, sub.penalty_pct, sub.feedback,
                 sub.completed_at, sub.reviewed_at, sub.returned_at, sub.project_id, sub.quiz_attempt_id, sub.game_id,
-                sp.status AS project_status, wga.status AS wg_status,
+                sp.status AS project_status, wga.status AS wg_status" . paste_flag_cols($pdo) . ",
                 (SELECT COUNT(*) FROM quiz_attempts qa
                   WHERE qa.assignment_id = sub.assignment_id AND qa.student_id = sub.student_id AND qa.status <> 'in_progress') AS quiz_done,
                 (SELECT os.score FROM submissions os WHERE os.assignment_id = a.source_assignment_id AND os.student_id = sub.student_id LIMIT 1) AS orig_score,
