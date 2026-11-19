@@ -21,6 +21,9 @@ if (!$subject) {
 }
 
 $rows = space_assignment_rows($pdo, $teacherId, null, $subjectId);
+// Las actividades de recuperación van aparte, agrupadas en su grupo ("🔁 Recuperaciones")
+$rows = array_values(array_filter($rows, fn($r) => empty($r['recovery_group_id'])));
+$recGroups = recovery_groups_for_subject($pdo, $subjectId, $teacherId);
 $sum = space_summarize($rows);
 
 $counts = [
@@ -68,6 +71,7 @@ require __DIR__ . '/../includes/header.php';
         <p class="space-sub"><?= e($subject['course_name']) ?></p>
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="btn btn-secondary" href="recovery.php?subject=<?= (int) $subjectId ?>">🔁 Recuperaciones</a>
         <a class="btn btn-secondary" href="subject_report.php?id=<?= (int) $subjectId ?>">📊 Reporte de estudiantes</a>
         <a class="btn btn-secondary" href="materials.php?subject=<?= (int) $subjectId ?>">📁 Archivos para estudiantes</a>
         <a class="btn btn-secondary" href="import_content.php?subject=<?= (int) $subjectId ?>">📥 Importar contenido</a>
@@ -82,12 +86,30 @@ require __DIR__ . '/../includes/header.php';
     <div class="stat-pill green"><div class="n"><?= (int) $sum['graded_submissions'] ?></div><div class="l">Entregas corregidas / calificadas</div></div>
 </div>
 
-<?php if (empty($rows)): ?>
+<?php if (!empty($recGroups)): ?>
+    <h2 style="font-size:1.05rem; margin:18px 0 0;">🔁 Recuperaciones</h2>
+    <div class="space-grid">
+        <?php foreach ($recGroups as $g): $t = max(1, $g['total']); ?>
+            <a class="asg-card <?= $g['needs_grading'] > 0 ? 'needs' : ($g['pending'] > 0 ? 'pending' : 'done') ?>" href="recovery_group.php?id=<?= (int) $g['id'] ?>">
+                <h3>🔁 <?= e($g['name']) ?></h3>
+                <p class="asg-kind"><?= (int) $g['students'] ?> estudiante<?= $g['students'] === 1 ? '' : 's' ?> · <?= (int) $g['items'] ?> actividad<?= $g['items'] === 1 ? '' : 'es' ?></p>
+                <div class="progress"><span class="p-graded" style="width:<?= round($g['graded'] / $t * 100, 1) ?>%"></span><span class="p-needs" style="width:<?= round($g['needs_grading'] / $t * 100, 1) ?>%"></span></div>
+                <div class="chips">
+                    <?php if ($g['needs_grading'] > 0): ?><span class="chip chip-red">🔴 <?= (int) $g['needs_grading'] ?> por corregir</span><?php endif; ?>
+                    <?php if ($g['graded'] > 0): ?><span class="chip chip-green">✅ <?= (int) $g['graded'] ?></span><?php endif; ?>
+                    <?php if ($g['pending'] > 0): ?><span class="chip chip-amber">⏳ <?= (int) $g['pending'] ?> sin entregar</span><?php endif; ?>
+                </div>
+            </a>
+        <?php endforeach; ?>
+    </div>
+<?php endif; ?>
+
+<?php if (empty($rows) && empty($recGroups)): ?>
     <div class="empty-box">
         <p style="font-size:1.1rem; margin:0 0 8px;">Aún no hay asignaciones en esta asignatura.</p>
         <a class="btn" href="assignments.php?subject=<?= (int) $subjectId ?>">Crear la primera asignación</a>
     </div>
-<?php else: ?>
+<?php elseif (!empty($rows)): ?>
     <div class="space-tabs" role="tablist">
         <?php foreach ($tabs as $key => [$label, $cls]): ?>
             <button type="button" class="space-tab <?= $key === $defaultTab ? 'active' : '' ?>" data-tab="<?= $key ?>" role="tab">

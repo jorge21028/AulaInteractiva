@@ -4,6 +4,7 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/announcement_helpers.php';
+require_once __DIR__ . '/../includes/recovery_helpers.php';
 
 require_role('student');
 
@@ -32,11 +33,13 @@ if (!empty($courses)) {
     }
 }
 
+$recReady = recovery_ready($pdo);
 // Todas las asignaciones de este estudiante, con su asignatura
 $allStmt = $pdo->prepare(
-    "SELECT a.id, a.title, a.start_date, COALESCE(ax.due_date, a.due_date) AS due_date, a.points, a.subject_id, sub.status, sub.returned_at
+    "SELECT a.id, a.title, a.start_date, COALESCE(ax.due_date, a.due_date) AS due_date, a.points, a.subject_id, sub.status, sub.returned_at, sub.score" . ($recReady ? ", a.recovery_group_id, rg.name AS recovery_name, rg.description AS recovery_desc" : ", NULL AS recovery_group_id, NULL AS recovery_name, NULL AS recovery_desc") . "
      FROM submissions sub
      INNER JOIN assignments a ON a.id = sub.assignment_id
+     " . ($recReady ? "LEFT JOIN recovery_groups rg ON rg.id = a.recovery_group_id" : "") . "
      LEFT JOIN assignment_extensions ax ON ax.assignment_id = a.id AND ax.student_id = :student_id2
      WHERE sub.student_id = :student_id
        AND (a.start_date IS NULL OR a.start_date <= :now)
@@ -47,6 +50,7 @@ $allStmt->execute(['student_id' => $studentId, 'student_id2' => $studentId, 'now
 
 // Agrupadas por asignatura y estado, listas para renderizar sin más consultas
 $assignmentsBySubject = [];
+$recoveryBySubject = [];
 foreach ($allStmt->fetchAll() as $a) {
     if ($a['status'] === 'completed') {
         $bucket = 'completed';
@@ -54,6 +58,14 @@ foreach ($allStmt->fetchAll() as $a) {
         $bucket = 'overdue';   // venció la entrega: se muestra como vencida y ya no se puede entregar
     } else {
         $bucket = 'pending';
+    }
+    if (!empty($a['recovery_group_id'])) {
+        // Actividades de recuperación: van agrupadas por grupo, aparte de las normales
+        $gid = (int) $a['recovery_group_id'];
+        $recoveryBySubject[$a['subject_id']][$gid]['name'] = $a['recovery_name'];
+        $recoveryBySubject[$a['subject_id']][$gid]['desc'] = $a['recovery_desc'];
+        $recoveryBySubject[$a['subject_id']][$gid]['items'][] = $a + ['bucket' => $bucket];
+        continue;
     }
     $assignmentsBySubject[$a['subject_id']][$bucket][] = $a;
 }
@@ -125,7 +137,14 @@ require __DIR__ . '/../includes/header.php';
                         $pending = $assignmentsBySubject[$subj['id']]['pending'] ?? [];
                         $completed = $assignmentsBySubject[$subj['id']]['completed'] ?? [];
                         $overdue = $assignmentsBySubject[$subj['id']]['overdue'] ?? [];
-                        $pendingCount = count($pending);
+                        $recGroups = $recoveryBySubject[$subj['id']] ?? [];
+                        $recPending = 0;
+                        foreach ($recGroups as $rgp) {
+                            foreach ($rgp['items'] as $ri) {
+                                if ($ri['bucket'] === 'pending') { $recPending++; }
+                            }
+                        }
+                        $pendingCount = count($pending) + $recPending;
                         $overdueCount = count($overdue);
                     ?>
                     <details style="margin-bottom:10px;" <?= $pendingCount > 0 ? 'open' : '' ?>>
@@ -146,6 +165,33 @@ require __DIR__ . '/../includes/header.php';
                                 <a class="btn btn-secondary" style="margin:0 0 8px; padding:6px 14px; font-size:0.85rem;"
                                    href="materials.php?subject=<?= (int) $subj['id'] ?>">📁 Archivos de la asignatura (<?= $fileCount ?>)</a>
                             <?php endif; ?>
+                            <?php foreach ($recGroups as $rgp):
+                                $rDone = count(array_filter($rgp['items'], fn($x) => $x['bucket'] === 'completed'));
+                            ?>
+                                <div style="margin:4px 0 16px; padding:10px 12px; border:1px solid #FCD9A8; border-left:4px solid #F59E0B; border-radius:10px; background:#FFFBF2;">
+                                    <h4 style="margin:0 0 4px;">🔁 <?= e($rgp['name']) ?>
+                                        <span class="text-muted" style="font-weight:400; font-size:0.82rem;"> — <?= $rDone ?> de <?= count($rgp['items']) ?> realizada<?= count($rgp['items']) === 1 ? '' : 's' ?></span></h4>
+                                    <?php if (!empty($rgp['desc'])): ?><p class="text-muted" style="margin:0 0 8px; font-size:0.85rem;"><?= e($rgp['desc']) ?></p><?php endif; ?>
+                                    <?php foreach ($rgp['items'] as $a):
+                                        $isDone = $a['bucket'] === 'completed'; $isLate = $a['bucket'] === 'overdue';
+                                    ?>
+                                        <a class="card" href="assignment.php?id=<?= (int) $a['id'] ?>" style="display:block; margin-bottom:6px; padding:10px 14px; <?= $isLate ? 'border-color:#F8C9C9; background:#FFF8F8;' : '' ?>">
+                                            <strong><?= e(str_replace(RECOVERY_TITLE_SUFFIX, '', $a['title'])) ?></strong>
+                                            <?php if ($isDone): ?>
+                                                <span style="display:inline-block; margin-left:6px; padding:1px 8px; border-radius:999px; font-size:0.75rem; font-weight:700; background:#E6F6EC; color:#15803D; border:1px solid #BFE5CC;">✅ Realizada</span>
+                                            <?php elseif ($isLate): ?>
+                                                <span style="display:inline-block; margin-left:6px; padding:1px 8px; border-radius:999px; font-size:0.75rem; font-weight:700; background:#FDECEC; color:#B91C1C; border:1px solid #F8C9C9;">Vencida</span>
+                                            <?php else: ?>
+                                                <span style="display:inline-block; margin-left:6px; padding:1px 8px; border-radius:999px; font-size:0.75rem; font-weight:700; background:#FFF4E5; color:#B45309; border:1px solid #FCD9A8;">⏳ Pendiente</span>
+                                            <?php endif; ?>
+                                            <p class="text-muted" style="margin:4px 0 0; font-size:0.85rem;">
+                                                <?= (int) $a['points'] ?> pts<?php if ($a['due_date']): ?> · <?= $isLate ? 'Venció el ' : 'Entrega: ' ?><?= e(dt_format($a['due_date'])) ?><?php endif; ?>
+                                            </p>
+                                        </a>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endforeach; ?>
+
                             <h4 style="margin-bottom:8px;">⏳ Pendientes</h4>
                             <?php if (empty($pending)): ?>
                                 <p class="empty-state" style="padding:8px 0; font-size:0.85rem;">Sin actividades pendientes en esta asignatura.</p>

@@ -11,6 +11,8 @@
  * (solo hay preguntas 'multiple' y 'truefalse', igual que en Trivia).
  */
 
+require_once __DIR__ . '/recovery_helpers.php';
+
 if (!defined('AULA_APP')) {
     http_response_code(403);
     exit('Acceso directo no permitido.');
@@ -27,7 +29,8 @@ function quiz_start_or_resume_attempt(PDO $pdo, array $quiz, int $studentId, ?in
 
     // ¿Hay un intento en curso que todavía no venció?
     $stmt = $pdo->prepare(
-        "SELECT * FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id
+        "SELECT * FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id"
+        . recovery_attempt_scope($pdo, $assignmentId) . "
          AND status = 'in_progress' ORDER BY id DESC LIMIT 1"
     );
     $stmt->execute(['quiz_id' => $quizId, 'student_id' => $studentId]);
@@ -44,7 +47,7 @@ function quiz_start_or_resume_attempt(PDO $pdo, array $quiz, int $studentId, ?in
 
     // ¿Cuántos intentos ya completó?
     $countStmt = $pdo->prepare(
-        "SELECT COUNT(*) AS total FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id AND status = 'submitted'"
+        "SELECT COUNT(*) AS total FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id" . recovery_attempt_scope($pdo, $assignmentId) . " AND status = 'submitted'"
     );
     $countStmt->execute(['quiz_id' => $quizId, 'student_id' => $studentId]);
     $submittedCount = (int) ($countStmt->fetch()['total'] ?? 0);
@@ -335,7 +338,23 @@ function quiz_sync_submission(PDO $pdo, int $quizId, int $studentId, int $attemp
     $asgStmt->execute(['quiz_id' => $quizId]);
     $assignments = $asgStmt->fetchAll();
 
+    // Un intento hecho desde una actividad de recuperación solo cuenta para esa actividad, y uno normal no toca las recuperaciones
+    $attemptAssignmentId = (int) ($attempt['assignment_id'] ?? 0);
+    $attemptIsRecovery = false;
+    foreach ($assignments as $asg) {
+        if ((int) $asg['id'] === $attemptAssignmentId && !empty($asg['recovery_group_id'])) {
+            $attemptIsRecovery = true;
+        }
+    }
+
     foreach ($assignments as $assignment) {
+        $isRecoveryAsg = !empty($assignment['recovery_group_id']);
+        if ($isRecoveryAsg && (int) $assignment['id'] !== $attemptAssignmentId) {
+            continue;
+        }
+        if (!$isRecoveryAsg && $attemptIsRecovery) {
+            continue;
+        }
         $newScore = round($percentage * (int) $assignment['points'], 2);
 
         $subStmt = $pdo->prepare('SELECT * FROM submissions WHERE assignment_id = :aid AND student_id = :sid');

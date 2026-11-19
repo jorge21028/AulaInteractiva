@@ -44,6 +44,8 @@ $quiz = [
     'questions_per_attempt' => $row['questions_per_attempt'] !== null ? (int) $row['questions_per_attempt'] : null,
 ];
 
+// Los intentos de una actividad de recuperación no se mezclan con los de la asignación original
+$qScope = recovery_attempt_scope($pdo, $assignmentId);
 $isOverdue = assignment_is_past_due($row);
 $errors = [];
 $reviewOnly = isset($_GET['review']);
@@ -90,7 +92,7 @@ $startError = null;
 if ($reviewOnly && !$submittedAttempt) {
     // Solo quiere ver su mejor resultado, sin iniciar ni retomar ningún intento.
     $bestStmt = $pdo->prepare(
-        "SELECT * FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id AND status = 'submitted'
+        "SELECT * FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id" . $qScope . " AND status = 'submitted'
          ORDER BY (score_points / NULLIF(score_max, 0)) DESC, id DESC LIMIT 1"
     );
     $bestStmt->execute(['quiz_id' => $quiz['id'], 'student_id' => $studentId]);
@@ -103,13 +105,13 @@ if ($reviewOnly && !$submittedAttempt) {
 if (!$submittedAttempt && !$reviewOnly) {
     // ¿Cuántos intentos ya usó, para decidir si puede empezar uno nuevo?
     $usedStmt = $pdo->prepare(
-        "SELECT COUNT(*) AS total FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id AND status = 'submitted'"
+        "SELECT COUNT(*) AS total FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id" . $qScope . " AND status = 'submitted'"
     );
     $usedStmt->execute(['quiz_id' => $quiz['id'], 'student_id' => $studentId]);
     $usedAttempts = (int) ($usedStmt->fetch()['total'] ?? 0);
 
     $openStmt = $pdo->prepare(
-        "SELECT * FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id AND status = 'in_progress' ORDER BY id DESC LIMIT 1"
+        "SELECT * FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id" . $qScope . " AND status = 'in_progress' ORDER BY id DESC LIMIT 1"
     );
     $openStmt->execute(['quiz_id' => $quiz['id'], 'student_id' => $studentId]);
     $hasOpenAttempt = (bool) $openStmt->fetch();
@@ -142,7 +144,7 @@ if (!$submittedAttempt && !$reviewOnly) {
     // revisión del mejor en vez de dejar al estudiante solo con un error.
     if ($startError) {
         $bestStmt = $pdo->prepare(
-            "SELECT * FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id AND status = 'submitted'
+            "SELECT * FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id" . $qScope . " AND status = 'submitted'
              ORDER BY (score_points / NULLIF(score_max, 0)) DESC, id DESC LIMIT 1"
         );
         $bestStmt->execute(['quiz_id' => $quiz['id'], 'student_id' => $studentId]);

@@ -8,6 +8,7 @@ require_once __DIR__ . '/../includes/availability_helpers.php';
 require_once __DIR__ . '/../includes/description_helpers.php';
 require_once __DIR__ . '/../includes/group_helpers.php';
 require_once __DIR__ . '/../includes/late_helpers.php';
+require_once __DIR__ . '/../includes/recovery_helpers.php';
 require_once __DIR__ . '/../includes/forum_helpers.php';
 require_once __DIR__ . '/../includes/autosubmit_helpers.php';
 
@@ -75,7 +76,7 @@ if ($isWordGame) {
 $quizAttemptsUsed = 0;
 if ($isQuiz) {
     $usedStmt = $pdo->prepare(
-        "SELECT COUNT(*) AS total FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id AND status = 'submitted'"
+        "SELECT COUNT(*) AS total FROM quiz_attempts WHERE quiz_id = :quiz_id AND student_id = :student_id" . recovery_attempt_scope($pdo, $assignmentId) . " AND status = 'submitted'"
     );
     $usedStmt->execute(['quiz_id' => $assignment['quiz_id'], 'student_id' => $studentId]);
     $quizAttemptsUsed = (int) ($usedStmt->fetch()['total'] ?? 0);
@@ -111,7 +112,10 @@ $pageTitle = $assignment['title'];
 require __DIR__ . '/../includes/header.php';
 ?>
 <p><a href="dashboard.php">&larr; Volver a mi panel</a></p>
-<h1><?= e($assignment['title']) ?></h1>
+<h1><?= e(str_replace(RECOVERY_TITLE_SUFFIX, '', $assignment['title'])) ?></h1>
+<?php if (!empty($assignment['recovery_group_id'])): ?>
+    <p style="margin:-4px 0 10px;"><span style="display:inline-block; padding:3px 12px; border-radius:999px; font-weight:700; font-size:0.85rem; background:#FFF4E5; color:#B45309; border:1px solid #FCD9A8;">🔁 Actividad de recuperación</span></p>
+<?php endif; ?>
 <p class="text-muted">
     <?= e($assignment['subject_name']) ?> ·
     <?php if ($isQuiz): ?>

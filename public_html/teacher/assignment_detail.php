@@ -387,6 +387,9 @@ require __DIR__ . '/../includes/header.php';
 ?>
 <p><a href="subject.php?id=<?= (int) $assignment['subject_id'] ?>">&larr; Volver a la asignatura</a></p>
 <h1><?= e($assignment['title']) ?></h1>
+<?php if (!empty($assignment['recovery_group_id'])): ?>
+    <p style="margin:-4px 0 8px;"><a href="recovery_group.php?id=<?= (int) $assignment['recovery_group_id'] ?>" style="display:inline-block; padding:3px 12px; border-radius:999px; font-weight:600; font-size:0.85rem; background:#FFF4E5; color:#B45309; border:1px solid #FCD9A8;">🔁 Actividad de recuperación · ver el grupo y calificar todo junto</a></p>
+<?php endif; ?>
 <?php if ($isTargeted || !empty($notAssigned)): ?>
     <p style="margin:-4px 0 8px;">
         <span style="display:inline-block; padding:3px 12px; border-radius:999px; font-weight:600; font-size:0.85rem; background:#EEF2FF; color:#4338CA; border:1px solid #C7D2FE;">

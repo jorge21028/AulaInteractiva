@@ -19,6 +19,7 @@ if (!defined('AULA_APP')) {
 require_once __DIR__ . '/game_helpers.php';
 require_once __DIR__ . '/project_helpers.php';
 require_once __DIR__ . '/availability_helpers.php';
+require_once __DIR__ . '/recovery_helpers.php';
 
 const SPACE_PALETTE = [
     ['#0878F9', '#7B2CFF'], ['#00B894', '#0984E3'], ['#F59E0B', '#EF4444'], ['#7B2CFF', '#EC4899'],
@@ -38,7 +39,7 @@ function space_gradient(int $id): string
  */
 function space_assignment_rows(PDO $pdo, int $teacherId, ?int $courseId = null, ?int $subjectId = null): array
 {
-    $sql = 'SELECT a.id, a.title, a.start_date, a.due_date, a.points, a.project_type, a.activity_id, a.quiz_id, a.created_at, a.subject_id, a.audience,
+    $sql = 'SELECT a.id, a.title, a.start_date, a.due_date, a.points, a.project_type, a.activity_id, a.quiz_id, a.created_at, a.subject_id, a.audience' . recovery_col($pdo) . ',
                    s.name AS subject_name, s.course_id, act.title AS activity_title, act.game_mode, qz.title AS quiz_title,
                    COUNT(sub.id) AS total,
                    COALESCE(SUM(sub.status = \'completed\'), 0) AS completed,
