@@ -453,7 +453,7 @@ function project_submit(PDO $pdo, int $projectId, int $studentId, ?string $syste
 
         if ($project['assignment_id']) {
             $subStmt = $pdo->prepare(
-                'SELECT id, reviewed_at, returned_at FROM submissions WHERE assignment_id = :aid AND student_id = :sid'
+                'SELECT id, reviewed_at, returned_at, auto_zero_at FROM submissions WHERE assignment_id = :aid AND student_id = :sid'
             );
             $subStmt->execute(['aid' => $project['assignment_id'], 'sid' => $studentId]);
             $submission = $subStmt->fetch();
@@ -466,9 +466,24 @@ function project_submit(PDO $pdo, int $projectId, int $studentId, ?string $syste
                         "UPDATE submissions SET status = 'completed', project_id = :pid, completed_at = :now,
                                 returned_at = NULL, return_note = NULL, auto_submitted = :auto WHERE id = :id"
                     )->execute(['pid' => $projectId, 'now' => $at, 'auto' => $auto, 'id' => $submission['id']]);
+                } elseif (!empty($submission['auto_zero_at'])) {
+                    // Tenía el 0 automático por no entregar a tiempo, pero entregó (prórroga o entrega tardía):
+                    // queda ENTREGADA y sin calificar para que el profesor la corrija (se quita el 0 automático).
+                    $pdo->prepare(
+                        "UPDATE submissions SET status = 'completed', project_id = :pid, completed_at = :now,
+                                returned_at = NULL, return_note = NULL, auto_submitted = :auto,
+                                score = NULL, raw_score = NULL, reviewed_at = NULL,
+                                feedback = IF(feedback LIKE 'Sin entrega:%', NULL, feedback), auto_zero_at = NULL
+                         WHERE id = :id"
+                    )->execute(['pid' => $projectId, 'now' => $at, 'auto' => $auto, 'id' => $submission['id']]);
                 } else {
-                    $pdo->prepare('UPDATE submissions SET project_id = :pid WHERE id = :id')
-                        ->execute(['pid' => $projectId, 'id' => $submission['id']]);
+                    // El profesor ya la había calificado: se conserva su nota, pero la entrega sí queda registrada
+                    // (antes se quedaba como "pendiente" y al estudiante le salía vencida aunque había entregado).
+                    $pdo->prepare(
+                        "UPDATE submissions SET status = 'completed', project_id = :pid, completed_at = COALESCE(completed_at, :now),
+                                returned_at = NULL, return_note = NULL, auto_submitted = :auto
+                         WHERE id = :id"
+                    )->execute(['pid' => $projectId, 'now' => $at, 'auto' => $auto, 'id' => $submission['id']]);
                 }
             } else {
                 $pdo->prepare(
