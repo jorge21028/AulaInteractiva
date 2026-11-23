@@ -509,6 +509,33 @@ require __DIR__ . '/../includes/header.php';
             <?php csrf_field(); ?>
             <input type="hidden" name="action" value="update_grades_bulk">
 
+            <?php
+                $quickDone = 0; $quickRest = 0;
+                foreach ($roster as $qr) { if ($qr['status'] === 'completed') { $quickDone++; } else { $quickRest++; } }
+            ?>
+            <div class="card" id="quick-grade" style="margin-bottom:12px; padding:14px 16px; border-left:4px solid #4F46E5;">
+                <strong>⚡ Calificación rápida</strong>
+                <p class="text-muted" style="margin:2px 0 10px; font-size:0.85rem;">
+                    Escribe una sola nota para todas las entregadas y/o una sola para todas las que no están completas o no han empezado.
+                    Se llenan las casillas de abajo para que las veas; <strong>no se guarda nada hasta que pulses “Guardar todas las calificaciones”</strong>.
+                </p>
+                <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end;">
+                    <div>
+                        <label for="quick-done" style="margin-top:0;">✅ Entregadas (<?= $quickDone ?>)</label>
+                        <input type="text" inputmode="decimal" id="quick-done" placeholder="Ej: 2" style="width:100px;">
+                    </div>
+                    <div>
+                        <label for="quick-rest" style="margin-top:0;">⏳ No entregadas / por empezar (<?= $quickRest ?>)</label>
+                        <input type="text" inputmode="decimal" id="quick-rest" placeholder="Ej: 0" style="width:100px;">
+                    </div>
+                    <button type="button" class="btn btn-secondary" id="quick-apply" style="margin:0;">Aplicar a la lista</button>
+                </div>
+                <label style="display:flex; gap:6px; align-items:center; font-weight:400; font-size:0.85rem; margin:10px 0 0;">
+                    <input type="checkbox" id="quick-keep" style="width:auto;"> No tocar a quienes ya tienen nota
+                </label>
+                <p id="quick-msg" style="margin:8px 0 0; font-size:0.85rem; font-weight:600;"></p>
+            </div>
+
             <?php foreach ($roster as $r):
                 $sid = (int) $r['submission_id'];
                 $shown = $r['raw_score'] ?? $r['score'];
@@ -699,6 +726,44 @@ require __DIR__ . '/../includes/header.php';
                 filterButtons.forEach(b => { b.style.background = b.dataset.filter === key ? '#F1F5F9' : ''; });
             }
             filterButtons.forEach(b => b.addEventListener('click', () => applyFilter(b.dataset.filter)));
+
+            // Calificación rápida: llena las casillas (no guarda hasta pulsar "Guardar todas las calificaciones")
+            const quickMax = <?= (int) $assignment['points'] ?>;
+            function quickParse(id, label) {
+                const raw = document.getElementById(id).value.trim();
+                if (raw === '') return { skip: true };
+                const n = Number(raw.replace(',', '.'));
+                if (!isFinite(n) || n < 0) return { error: 'La nota de "' + label + '" no es válida.' };
+                return { value: raw.replace(',', '.') };
+            }
+            document.getElementById('quick-apply').addEventListener('click', () => {
+                const msg = document.getElementById('quick-msg');
+                const done = quickParse('quick-done', 'entregadas'), rest = quickParse('quick-rest', 'no entregadas');
+                msg.style.color = '#B45309';
+                if (done.error || rest.error) { msg.textContent = done.error || rest.error; return; }
+                if (done.skip && rest.skip) { msg.textContent = 'Escribe al menos una nota para aplicar.'; return; }
+                const keep = document.getElementById('quick-keep').checked;
+                let filled = 0, replaced = 0, kept = 0;
+                form.querySelectorAll('.grade-row').forEach(row => {
+                    const input = row.querySelector('input[name^="scores["]');
+                    if (!input) return;
+                    const target = row.dataset.state === 'completed' ? done : rest;
+                    if (target.skip) return;
+                    const hadGrade = input.dataset.original.trim() !== '';
+                    if (keep && hadGrade) { kept++; return; }
+                    if (hadGrade && Number(input.dataset.original.replace(',', '.')) !== Number(target.value)) replaced++;
+                    input.value = target.value;
+                    filled++;
+                });
+                refresh();
+                const over = ((!done.skip && Number(done.value) > quickMax) || (!rest.skip && Number(rest.value) > quickMax));
+                msg.style.color = '#15803D';
+                msg.textContent = 'Se puso la nota a ' + filled + ' estudiante' + (filled === 1 ? '' : 's')
+                    + (replaced ? ' (' + replaced + ' ya tenían otra nota y se reemplazará)' : '')
+                    + (kept ? ' · ' + kept + ' se respetaron' : '')
+                    + '. Revisa y pulsa “Guardar todas las calificaciones”.'
+                    + (over && filled > 0 ? ' ⚠️ Ojo: la nota es mayor que el valor de la actividad (' + quickMax + ').' : '');
+            });
 
             form.addEventListener('input', refresh);
             form.addEventListener('submit', () => { submitting = true; });

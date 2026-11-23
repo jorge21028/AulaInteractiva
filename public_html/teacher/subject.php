@@ -72,6 +72,7 @@ require __DIR__ . '/../includes/header.php';
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <a class="btn btn-secondary" href="recovery.php?subject=<?= (int) $subjectId ?>">🔁 Recuperaciones</a>
+        <a class="btn btn-secondary" href="export_activities.php?subject=<?= (int) $subjectId ?>">⬇️ Exportar CSV</a>
         <a class="btn btn-secondary" href="subject_report.php?id=<?= (int) $subjectId ?>">📊 Reporte de estudiantes</a>
         <a class="btn btn-secondary" href="materials.php?subject=<?= (int) $subjectId ?>">📁 Archivos para estudiantes</a>
         <a class="btn btn-secondary" href="import_content.php?subject=<?= (int) $subjectId ?>">📥 Importar contenido</a>
