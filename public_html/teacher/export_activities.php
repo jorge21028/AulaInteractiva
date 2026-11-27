@@ -31,6 +31,14 @@ function export_plain_text(?string $text): string
     return trim(preg_replace('/\s+/u', ' ', $text));
 }
 
+/** Fecha de la actividad: su fecha límite de entrega; si no tiene, la fecha en que se creó. Formato dd/mm/aaaa. */
+function export_date(array $a): string
+{
+    $raw = !empty($a['due_date']) ? $a['due_date'] : ($a['created_at'] ?? '');
+    $ts = $raw !== '' ? strtotime($raw) : false;
+    return $ts ? date('d/m/Y', $ts) : '';
+}
+
 /** Tipo de actividad, corto y claro (sin el título del cuestionario o de la actividad). */
 function export_kind_label(array $a): string
 {
@@ -46,12 +54,12 @@ function export_kind_label(array $a): string
 // recovery_group_id puede no existir si aún no se hizo la migración de recuperaciones
 $cols = recovery_ready($pdo) ? 'a.recovery_group_id' : 'NULL AS recovery_group_id';
 $stmt = $pdo->prepare(
-    "SELECT a.id, a.title, a.description, a.description_format, a.points, a.project_type, a.activity_id, a.quiz_id, a.due_date,
+    "SELECT a.id, a.title, a.description, a.description_format, a.points, a.project_type, a.activity_id, a.quiz_id, a.due_date, a.created_at,
             {$cols}, act.game_mode
      FROM assignments a
      LEFT JOIN activities act ON act.id = a.activity_id
      WHERE a.subject_id = :sid AND a.teacher_id = :tid
-     ORDER BY a.created_at ASC, a.id ASC"
+     ORDER BY COALESCE(a.due_date, a.created_at) DESC, a.id DESC"
 );
 $stmt->execute(['sid' => $subjectId, 'tid' => $teacherId]);
 $all = $stmt->fetchAll();
@@ -71,7 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $delimiter = ($_POST['delimiter'] ?? ';') === ',' ? ',' : ';';
         $withGrades = !empty($_POST['with_grades']);
-        // Respetar el orden de la lista (por fecha de creación), no el del formulario
+        // Respetar el orden de la lista (fecha más reciente primero), no el del formulario
         $selected = array_values(array_filter($all, fn($a) => in_array((int) $a['id'], $picked, true)));
 
         $students = [];
@@ -93,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Content-Disposition: attachment; filename="' . $fileName . '"');
         echo "\xEF\xBB\xBF"; // BOM: Excel reconoce las tildes
         $out = fopen('php://output', 'w');
-        $head = ['Nombre actividad', 'Descripción', 'Valor', 'Tipo de actividad'];
+        $head = ['Nombre actividad', 'Descripción', 'Valor', 'Tipo de actividad', 'Fecha'];
         foreach ($students as $stu) {
             $head[] = report_csv_safe($stu['name']);
         }
@@ -104,6 +112,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 report_csv_safe(export_plain_text($a['description'])),
                 (int) $a['points'],
                 export_kind_label($a),
+                export_date($a),
             ];
             foreach ($students as $stu) {
                 $sc = $scores[(int) $a['id']][(int) $stu['id']] ?? null;
@@ -142,8 +151,8 @@ require __DIR__ . '/../includes/header.php';
     <div class="empty-box">Esta asignatura todavía no tiene actividades.</div>
 <?php else: ?>
     <p class="text-muted" style="max-width:760px;">
-        Elige las actividades. El archivo tendrá estas columnas: <strong>Nombre actividad, Descripción, Valor, Tipo de actividad</strong>
-        (el valor son los puntos de la actividad).
+        Elige las actividades. El archivo tendrá estas columnas: <strong>Nombre actividad, Descripción, Valor, Tipo de actividad, Fecha</strong>
+        (el valor son los puntos; la fecha es la de entrega de la actividad, o la de creación si no tiene). Van ordenadas de la más reciente a la más antigua.
     </p>
 
     <form method="post" id="export-form">
@@ -166,7 +175,7 @@ require __DIR__ . '/../includes/header.php';
                     <span style="flex:1;">
                         <strong><?= e($a['title']) ?></strong>
                         <?php if (!empty($a['recovery_group_id'])): ?><span class="chip chip-amber">🔁 Recuperación</span><?php endif; ?>
-                        <br><span class="text-muted" style="font-size:0.82rem;"><?= e(export_kind_label($a)) ?> · <?= (int) $a['points'] ?> pts</span>
+                        <br><span class="text-muted" style="font-size:0.82rem;"><?= e(export_kind_label($a)) ?> · <?= (int) $a['points'] ?> pts · <?= e(export_date($a)) ?></span>
                     </span>
                 </label>
             <?php endforeach; ?>
